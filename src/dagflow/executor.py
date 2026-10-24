@@ -221,7 +221,11 @@ class Executor:
         key = cache_key(task, inputs) if cache is not None else None
 
         if cache is not None and key is not None:
-            hit = await asyncio.to_thread(cache.get, key)
+            try:
+                hit = await asyncio.to_thread(cache.get, key)
+            except Exception:
+                log.warning("task %r: could not read cache; running it", task.name, exc_info=True)
+                hit = MISSING
             if hit is not MISSING:
                 result.state, result.value = TaskState.CACHED, hit
                 result.duration = time.perf_counter() - started
