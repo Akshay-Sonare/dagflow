@@ -18,7 +18,7 @@ from dagflow import Workflow
 wf = Workflow("etl")
 
 
-@wf.task(retries=3, backoff=0.5, retry_on=(ConnectionError,))
+@wf.task(retries=3, backoff=0.5, jitter=0.2, retry_on=(ConnectionError,))
 async def orders():  # async tasks run on the event loop
     return await fetch_orders()
 
