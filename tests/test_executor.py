@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from typing import Any
 
 import pytest
 
@@ -293,3 +294,22 @@ def test_run_result_to_dict() -> None:
     assert summary["ok"] is True
     assert summary["tasks"]["answer"]["value"] == 42
     assert summary["tasks"]["answer"]["state"] == "success"
+
+
+def test_cache_read_failure_is_treated_as_a_miss() -> None:
+    class BrokenReads(MemoryCache):
+        def get(self, key: str) -> Any:
+            raise OSError("disk unavailable")
+
+    wf = Workflow()
+
+    @wf.task(cache=True)
+    def value() -> int:
+        return 7
+
+    cache = BrokenReads()
+    result = wf.run(cache=cache)
+    assert result.ok
+    assert result["value"] == 7
+    assert result.results["value"].state is TaskState.SUCCESS
+    assert len(cache) == 1  # writes still work
