@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dagflow.cli import load_workflow, main, parse_param
+from dagflow.cli import load_workflow, main, parse_param, split_spec
 
 WORKFLOW_SOURCE = """
 from dagflow import Workflow
@@ -56,6 +56,20 @@ def test_parse_param(raw: str, expected: tuple[str, object]) -> None:
 def test_parse_param_rejects_garbage(raw: str) -> None:
     with pytest.raises(argparse.ArgumentTypeError):
         parse_param(raw)
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ("flows/etl.py", ("flows/etl.py", "workflow")),
+        ("flows/etl.py:nightly", ("flows/etl.py", "nightly")),
+        ("pkg.module:wf", ("pkg.module", "wf")),
+        ("C:\\flows\\etl.py", ("C:\\flows\\etl.py", "workflow")),
+        ("C:\\flows\\etl.py:nightly", ("C:\\flows\\etl.py", "nightly")),
+    ],
+)
+def test_split_spec(spec: str, expected: tuple[str, str]) -> None:
+    assert split_spec(spec) == expected
 
 
 def test_load_workflow_by_path_and_attribute(wf_file: Path) -> None:

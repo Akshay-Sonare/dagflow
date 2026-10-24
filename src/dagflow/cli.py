@@ -19,14 +19,22 @@ from dagflow.executor import RunResult, TaskState
 from dagflow.workflow import Workflow
 
 
-def load_workflow(spec: str) -> Workflow:
-    """Resolve ``path/to/file.py:name`` or ``package.module:name`` to a Workflow.
+def split_spec(spec: str) -> tuple[str, str]:
+    """Split ``target[:name]`` into ``(target, name)``; ``name`` defaults to ``workflow``.
 
-    ``name`` defaults to ``workflow``.
+    Only a trailing ``:identifier`` counts, so Windows drive letters such as
+    ``C:\\flows\\etl.py`` stay part of the path.
     """
-    target, _, attr = spec.partition(":")
-    attr = attr or "workflow"
-    if target.endswith(".py") or os.sep in target:
+    head, sep, tail = spec.rpartition(":")
+    if sep and head and tail.isidentifier():
+        return head, tail
+    return spec, "workflow"
+
+
+def load_workflow(spec: str) -> Workflow:
+    """Resolve ``path/to/file.py:name`` or ``package.module:name`` to a Workflow."""
+    target, attr = split_spec(spec)
+    if target.endswith(".py") or os.sep in target or (os.altsep and os.altsep in target):
         path = Path(target).resolve()
         if not path.is_file():
             raise DagflowError(f"no such file: {target}")
