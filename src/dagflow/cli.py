@@ -127,6 +127,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         result = wf.run(
             dict(args.param),
             targets=args.target or None,
+            tags=args.tag or None,
             max_concurrency=args.jobs,
             cache=cache,
             fail_fast=args.fail_fast,
@@ -145,15 +146,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
 def _cmd_graph(args: argparse.Namespace) -> int:
     wf = load_workflow(args.workflow)
     dag = wf.dag()
-    if args.target:
-        dag = dag.subgraph(args.target)
+    selected = wf.select(args.target, args.tag)
+    if selected:
+        dag = dag.subgraph(selected)
     print(dag.to_mermaid() if args.format == "mermaid" else dag.to_dot(wf.name))
     return 0
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
     wf = load_workflow(args.workflow)
-    for i, layer in enumerate(wf.plan(targets=args.target or None), start=1):
+    for i, layer in enumerate(wf.plan(targets=args.target or None, tags=args.tag or None), start=1):
         print(f"stage {i}: {', '.join(layer)}")
     required = wf.required_params()
     if required:
@@ -172,6 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("workflow", help="path/to/file.py[:name] or module[:name]")
         p.add_argument(
             "-t", "--target", action="append", help="only this task and its dependencies"
+        )
+        p.add_argument(
+            "-T", "--tag", action="append", help="also select tasks with this tag (and their deps)"
         )
 
     run = sub.add_parser("run", help="execute a workflow")
