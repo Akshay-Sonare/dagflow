@@ -50,6 +50,7 @@ print(result["revenue"])
 | **Caching** | Content-addressed keys over the task's *bytecode* and canonicalised inputs, so editing a task invalidates its cache. In-memory and SQLite backends, or bring your own via a `Protocol`. |
 | **Validation up front** | Cycles (with the offending path), unknown tasks and missing inputs are reported before anything runs. |
 | **Partial runs** | `targets=[...]` runs only the requested tasks and their ancestors. |
+| **Tag filters** | `tags=[...]` / `-T tag` runs every task carrying a tag, plus what it depends on. Combines with `targets`. |
 | **Observability** | Typed lifecycle events on a pub/sub bus; the CLI's live reporter is just one listener. |
 | **Visualisation** | Export the graph as Mermaid or Graphviz DOT. |
 
@@ -95,6 +96,7 @@ dagflow plan  examples/sales_report.py              # execution stages + require
 dagflow graph examples/sales_report.py              # Mermaid diagram
 dagflow graph examples/sales_report.py -f dot | dot -Tpng > graph.png
 dagflow run   examples/sales_report.py -t revenue_by_customer --json
+dagflow run   pipeline.py -T nightly                # every task tagged "nightly" + its deps
 ```
 
 The example's graph, as produced by `dagflow graph`:

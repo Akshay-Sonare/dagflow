@@ -16,7 +16,7 @@ other = Workflow("other")
 def numbers(count: int = 3):
     return list(range(count))
 
-@workflow.task
+@workflow.task(tags=["summary"])
 def total(numbers):
     return sum(numbers)
 
@@ -94,6 +94,16 @@ def test_run_failure_exit_code(wf_file: Path, capsys: pytest.CaptureFixture[str]
 def test_run_with_target(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["run", str(wf_file), "-t", "numbers", "--json", "-q"]) == 0
     assert list(json.loads(capsys.readouterr().out)["tasks"]) == ["numbers"]
+
+
+def test_run_with_tag(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", str(wf_file), "-T", "summary", "--json", "-q"]) == 0
+    assert list(json.loads(capsys.readouterr().out)["tasks"]) == ["numbers", "total"]
+    assert main(["plan", str(wf_file), "-T", "summary"]) == 0
+    assert "broken" not in capsys.readouterr().out
+    assert main(["graph", str(wf_file), "-T", "summary"]) == 0
+    assert "broken" not in capsys.readouterr().out
+    assert main(["run", str(wf_file), "-T", "nope", "-q"]) == 2
 
 
 def test_graph_and_plan(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -5,6 +5,7 @@ from dagflow import (
     DuplicateTaskError,
     MissingInputError,
     RetryPolicy,
+    UnknownTagError,
     UnknownTaskError,
     Workflow,
     task,
@@ -192,3 +193,33 @@ def test_retry_policy_filters_exceptions() -> None:
     assert policy.should_retry(ConnectionError(), 1)
     assert not policy.should_retry(ValueError(), 1)
     assert not policy.should_retry(ConnectionError(), 3)
+
+
+def _tagged_workflow() -> Workflow:
+    wf = Workflow()
+    wf.add(
+        task(name="a", tags=["etl"])(lambda: 1),
+        task(name="b", tags=["report"])(lambda a: a + 1),
+        task(name="c", tags=["report", "etl"])(lambda: 9),
+        task(name="d")(lambda: 0),
+    )
+    return wf
+
+
+def test_run_filters_by_tag_and_pulls_in_dependencies() -> None:
+    result = _tagged_workflow().run(tags=["report"])
+    assert set(result.results) == {"a", "b", "c"}
+
+
+def test_tags_combine_with_targets() -> None:
+    result = _tagged_workflow().run(targets=["d"], tags=["report"])
+    assert set(result.results) == {"a", "b", "c", "d"}
+
+
+def test_unknown_tag_raises() -> None:
+    with pytest.raises(UnknownTagError, match="missing"):
+        _tagged_workflow().run(tags=["missing"])
+
+
+def test_plan_filters_by_tag() -> None:
+    assert _tagged_workflow().plan(tags=["etl"]) == [["a", "c"]]

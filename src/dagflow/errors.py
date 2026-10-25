@@ -31,6 +31,14 @@ class UnknownTaskError(DagflowError):
         self.referenced_by = referenced_by
 
 
+class UnknownTagError(DagflowError):
+    """A tag filter matched no task in the workflow."""
+
+    def __init__(self, tags: Sequence[str]) -> None:
+        self.tags = list(tags)
+        super().__init__("no task has any of the tags: " + ", ".join(self.tags))
+
+
 class CycleError(DagflowError):
     """The dependency graph contains a cycle and cannot be scheduled."""
 

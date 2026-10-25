@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import Any, overload
 
 from dagflow.cache import Cache
-from dagflow.errors import DuplicateTaskError, MissingInputError, UnknownTaskError
+from dagflow.errors import DuplicateTaskError, MissingInputError, UnknownTagError, UnknownTaskError
 from dagflow.events import EventBus, Listener
 from dagflow.executor import Executor, RunResult
 from dagflow.graph import DAG
@@ -137,7 +137,32 @@ class Workflow:
                     needed.setdefault(param, []).append(item.name)
         return needed
 
-    def validate(self, params: Iterable[str] = (), *, targets: Iterable[str] | None = None) -> DAG:
+    def select(
+        self, targets: Iterable[str] | None = None, tags: Iterable[str] | None = None
+    ) -> list[str] | None:
+        """Combine explicit ``targets`` with every task carrying any of ``tags``.
+
+        Returns ``None`` when neither filter is given (meaning "everything").
+
+        Raises:
+            UnknownTagError: ``tags`` were given but no task has any of them.
+        """
+        chosen = list(targets or ())
+        wanted = set(tags or ())
+        if wanted:
+            tagged = [t.name for t in self._tasks.values() if t.tags & wanted]
+            if not tagged:
+                raise UnknownTagError(sorted(wanted))
+            chosen.extend(name for name in tagged if name not in chosen)
+        return chosen or None
+
+    def validate(
+        self,
+        params: Iterable[str] = (),
+        *,
+        targets: Iterable[str] | None = None,
+        tags: Iterable[str] | None = None,
+    ) -> DAG:
         """Check the workflow can run with ``params`` and return its (sub)graph.
 
         Raises:
@@ -146,9 +171,9 @@ class Workflow:
             MissingInputError: a task has an input nobody provides.
         """
         graph = self.dag()
-        targets = list(targets or ())
-        if targets:
-            graph = graph.subgraph(targets)
+        selected = self.select(targets, tags)
+        if selected:
+            graph = graph.subgraph(selected)
         graph.topological_order()
         provided = set(params)
         for name in graph:
@@ -162,16 +187,20 @@ class Workflow:
                 raise MissingInputError(name, missing)
         return graph
 
-    def plan(self, *, targets: Iterable[str] | None = None) -> list[list[str]]:
+    def plan(
+        self, *, targets: Iterable[str] | None = None, tags: Iterable[str] | None = None
+    ) -> list[list[str]]:
         """Execution layers: tasks in the same layer may run concurrently."""
         graph = self.dag()
-        return (graph.subgraph(targets) if targets else graph).layers()
+        selected = self.select(targets, tags)
+        return (graph.subgraph(selected) if selected else graph).layers()
 
     async def arun(
         self,
         params: Mapping[str, Any] | None = None,
         *,
         targets: Iterable[str] | None = None,
+        tags: Iterable[str] | None = None,
         max_concurrency: int = 8,
         cache: Cache | None = None,
         fail_fast: bool = False,
@@ -179,7 +208,7 @@ class Workflow:
     ) -> RunResult:
         """Run the workflow on the current event loop. See :meth:`run`."""
         params = dict(params or {})
-        graph = self.validate(params, targets=targets)
+        graph = self.validate(params, targets=targets, tags=tags)
         bus = EventBus()
         for listener in listeners:
             bus.subscribe(listener)
@@ -193,6 +222,7 @@ class Workflow:
         params: Mapping[str, Any] | None = None,
         *,
         targets: Iterable[str] | None = None,
+        tags: Iterable[str] | None = None,
         max_concurrency: int = 8,
         cache: Cache | None = None,
         fail_fast: bool = False,
@@ -203,6 +233,7 @@ class Workflow:
         Args:
             params: Values for task parameters that aren't other tasks.
             targets: Run only these tasks and what they depend on.
+            tags: Also run every task with any of these tags (plus its dependencies).
             max_concurrency: Maximum task attempts in flight at once.
             cache: Backend for tasks declared with ``cache=True``.
             fail_fast: Cancel running tasks as soon as any task fails.
@@ -212,6 +243,7 @@ class Workflow:
             self.arun(
                 params,
                 targets=targets,
+                tags=tags,
                 max_concurrency=max_concurrency,
                 cache=cache,
                 fail_fast=fail_fast,

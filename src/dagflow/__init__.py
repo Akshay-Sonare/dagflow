@@ -13,6 +13,7 @@ from dagflow.errors import (
     MissingInputError,
     TaskFailedError,
     TaskTimeoutError,
+    UnknownTagError,
     UnknownTaskError,
 )
 from dagflow.events import Event, EventBus, EventType, Listener
@@ -45,6 +46,7 @@ __all__ = [
     "TaskResult",
     "TaskState",
     "TaskTimeoutError",
+    "UnknownTagError",
     "UnknownTaskError",
     "Workflow",
     "__version__",
