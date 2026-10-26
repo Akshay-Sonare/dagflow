@@ -136,3 +136,19 @@ def test_ui_reports_busy_port(wf_file: Path, capsys: pytest.CaptureFixture[str])
         port = busy.getsockname()[1]
         assert main(["ui", str(wf_file), "--port", str(port), "--no-browser"]) == 2
     assert "cannot listen" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("host", "warned"), [("127.0.0.1", False), ("0.0.0.0", True)])
+def test_ui_warns_when_exposed_beyond_localhost(
+    wf_file: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
+    warned: bool,
+) -> None:
+    def stop_immediately(self: object, poll_interval: float = 0.5) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("dagflow.cli.DashboardServer.serve_forever", stop_immediately)
+    assert main(["ui", str(wf_file), "--host", host, "--port", "0", "--no-browser"]) == 0
+    assert ("warning: listening on" in capsys.readouterr().err) is warned

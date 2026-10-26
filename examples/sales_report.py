@@ -10,7 +10,7 @@ Run it with:
 from __future__ import annotations
 
 import asyncio
-import itertools
+import threading
 import time
 from collections import defaultdict
 from typing import Any
@@ -19,7 +19,9 @@ from dagflow import Workflow
 
 workflow = Workflow("sales_report")
 
-_order_api_calls = itertools.count(1)
+# Per thread, because every dashboard run gets its own thread: concurrent runs
+# then can't use up each other's successful calls.
+_order_api = threading.local()
 
 
 @workflow.task(tags={"extract"})
@@ -36,7 +38,8 @@ async def orders() -> list[dict[str, Any]]:
     await asyncio.sleep(0.2)
     # Modulo, not "first two calls", so the demo stays flaky on every run of a
     # long-lived process such as `dagflow ui`.
-    if next(_order_api_calls) % 3:
+    _order_api.calls = getattr(_order_api, "calls", 0) + 1
+    if _order_api.calls % 3:
         raise ConnectionError("orders API returned 503")
     return [
         {"customer_id": cid, "amount": amount, "currency": cur}

@@ -213,7 +213,7 @@ const STATE_LABEL = { idle: "not in run", pending: "waiting", running: "running"
   success: "succeeded", cached: "cached", failed: "failed", skipped: "skipped", cancelled: "cancelled" };
 
 const S = { wf: null, byName: {}, tasks: {}, run: null, events: [], t0: null, tEnd: null,
-  selected: null, source: null, history: [], tagsOn: new Set() };
+  selected: null, source: null, history: [], tagsOn: new Set(), loadToken: 0, applied: 0 };
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options) {
@@ -489,26 +489,42 @@ async function refreshHistory() {
 }
 
 async function loadRun(id) {
-  S.source?.close();
+  // Clicks can overlap; only the most recent load may take over the view.
+  const token = ++S.loadToken;
   const run = await api(`/api/runs/${id}`);
+  if (token !== S.loadToken) return;
+  S.source?.close();
+  S.source = null;
   S.run = run;
-  resetTasks("pending");
-  // A run only covers its selected subgraph; until events arrive, unknown tasks look idle.
+  resetTasks("idle");
+  // Only tasks in the run's selected subgraph will run; the rest stay "not in run".
+  for (const name of run.tasks) if (S.tasks[name]) S.tasks[name].state = "pending";
   run.events.forEach(apply);
-  if (run.status === "running") follow(run.id, run.events.length);
+  S.applied = run.events.length;
+  if (run.status === "running") follow(run.id);
   else finish(run);
   paint(); refreshHistory();
 }
 
-function follow(id, skip) {
-  let seen = 0;
+function follow(id) {
   const source = new EventSource(`/api/runs/${id}/events`);
   S.source = source;
-  source.onmessage = (msg) => { if (seen++ < skip) return; apply(JSON.parse(msg.data)); paint(); };
+  const stale = () => S.source !== source;
+  source.onmessage = (msg) => {
+    if (stale()) { source.close(); return; }
+    // Event ids are 1-based positions. The stream replays from the start on the
+    // first connect, so skip what loadRun already applied (and any repeats).
+    const n = Number(msg.lastEventId);
+    if (n <= S.applied) return;
+    S.applied = n;
+    apply(JSON.parse(msg.data));
+    paint();
+  };
   source.addEventListener("end", async () => {
     source.close();
+    if (stale()) return;
     const run = await api(`/api/runs/${id}`);
-    if (S.run?.id === id) { S.run = run; finish(run); paint(); }
+    if (!stale()) { S.run = run; finish(run); paint(); }
     refreshHistory();
   });
   source.onerror = () => { if (source.readyState === EventSource.CLOSED) refreshHistory(); };

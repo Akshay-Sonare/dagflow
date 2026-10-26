@@ -17,7 +17,7 @@ from dagflow.cache import SQLiteCache
 from dagflow.errors import DagflowError
 from dagflow.events import Event, EventType
 from dagflow.executor import RunResult, TaskState
-from dagflow.server import Dashboard, DashboardServer
+from dagflow.server import Dashboard, DashboardServer, coerce_param, is_loopback
 from dagflow.workflow import Workflow
 
 
@@ -60,10 +60,7 @@ def parse_param(raw: str) -> tuple[str, Any]:
     key, sep, value = raw.partition("=")
     if not sep or not key.isidentifier():
         raise argparse.ArgumentTypeError(f"expected key=value, got {raw!r}")
-    try:
-        return key, json.loads(value)
-    except json.JSONDecodeError:
-        return key, value
+    return key, coerce_param(value)
 
 
 class ConsoleReporter:
@@ -176,6 +173,13 @@ def _cmd_ui(args: argparse.Namespace) -> int:
     except OSError as exc:
         raise DagflowError(f"cannot listen on {args.host}:{args.port}: {exc}") from None
     print(f"dagflow dashboard for {wf.name!r} at {server.url}  (Ctrl+C to stop)", file=sys.stderr)
+    if not is_loopback(args.host):
+        print(
+            f"warning: listening on {args.host}, not just this computer. Anyone who can reach\n"
+            "this port can run the workflow with any parameters and read every result.\n"
+            "The dashboard has no login; only do this on a network you trust.",
+            file=sys.stderr,
+        )
     if not args.no_browser:
         webbrowser.open(server.url)
     try:
