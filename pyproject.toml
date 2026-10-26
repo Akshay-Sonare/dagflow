@@ -34,7 +34,7 @@ dagflow = "dagflow.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-dagflow = ["py.typed"]
+dagflow = ["py.typed", "ui/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["src", "tests"]

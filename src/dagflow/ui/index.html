@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dagflow dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f1f3f6; --border: #e3e6eb;
+    --text: #17202c; --muted: #637083; --faint: #9aa4b2; --accent: #4f46e5; --accent-ink: #fff;
+    --pending: #c3cad5; --running: #2563eb; --retrying: #d97706; --success: #16a34a;
+    --cached: #7c3aed; --failed: #dc2626; --skipped: #94a3b8; --cancelled: #a21caf;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --panel: #151b23; --panel-2: #1c232d; --border: #2a323d;
+      --text: #e6edf3; --muted: #9aa6b4; --faint: #6b7684; --accent: #818cf8; --accent-ink: #0d1117;
+      --pending: #3a4350; --running: #60a5fa; --retrying: #fbbf24; --success: #4ade80;
+      --cached: #a78bfa; --failed: #f87171; --skipped: #64748b; --cancelled: #e879f9;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input { font: inherit; color: inherit; }
+
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+    background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  .logo { font-weight: 700; letter-spacing: -.02em; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+  .logo svg { color: var(--accent); }
+  .wf-name { color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .spacer { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pill.running { color: var(--running); } .pill.succeeded { color: var(--success); }
+  .pill.failed, .pill.error { color: var(--failed); }
+  .pill.running::before { animation: pulse 1s ease-in-out infinite; }
+  .elapsed { font-family: var(--mono); color: var(--muted); font-size: 13px; min-width: 56px; text-align: right; }
+
+  main { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; padding: 16px 20px 28px; max-width: 1500px; margin: 0 auto; }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); min-width: 0; }
+  .card > h2 { margin: 0; padding: 11px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .card > h2 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); margin-left: auto; }
+  .body { padding: 14px; }
+
+  .field { margin-bottom: 12px; }
+  .field label { display: flex; align-items: baseline; gap: 6px; font-family: var(--mono); font-size: 13px; margin-bottom: 4px; }
+  .field .req { font-family: system-ui, sans-serif; font-size: 11px; color: var(--failed); }
+  .field input { width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); }
+  .field input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .field small { color: var(--faint); font-size: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .chip { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2);
+    cursor: pointer; font-size: 12px; }
+  .chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .run-btn { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink);
+    font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .run-btn:disabled { opacity: .55; cursor: progress; }
+  .run-btn kbd { font-family: var(--mono); font-size: 11px; opacity: .75; }
+  .form-error { color: var(--failed); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  .muted { color: var(--muted); } .empty { color: var(--faint); font-size: 13px; padding: 4px 0; }
+
+  .history { list-style: none; margin: 0; padding: 6px; max-height: 340px; overflow: auto; }
+  .history li button { width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+    padding: 7px 8px; border: 0; background: none; border-radius: 7px; cursor: pointer; text-align: left; }
+  .history li button:hover { background: var(--panel-2); }
+  .history li button[aria-current="true"] { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--accent); }
+  .history .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pending); }
+  .history .dot.running { background: var(--running); animation: pulse 1s infinite; }
+  .history .dot.succeeded { background: var(--success); } .history .dot.failed, .history .dot.error { background: var(--failed); }
+  .history .meta { font-size: 12px; color: var(--faint); font-family: var(--mono); }
+
+  .graph-wrap { overflow: auto; padding: 8px; }
+  svg.graph { display: block; margin: 0 auto; }
+  .edge { fill: none; stroke: var(--pending); stroke-width: 1.6; transition: stroke .25s; }
+  .edge.live { stroke: var(--success); }
+  .edge.dim { stroke-dasharray: 4 4; opacity: .5; }
+  .node { cursor: pointer; }
+  .node rect.box { fill: var(--panel); stroke: var(--pending); stroke-width: 1.5; transition: stroke .2s, fill .2s; }
+  .node rect.bar { fill: var(--pending); transition: fill .2s; }
+  .node text.name { font: 600 13px var(--mono); fill: var(--text); }
+  .node text.sub { font: 11.5px system-ui, sans-serif; fill: var(--muted); }
+  .node.selected rect.box { stroke: var(--accent); stroke-width: 2.5; }
+  .node:focus { outline: none; }
+  .node:focus-visible rect.box { stroke: var(--accent); stroke-width: 2.5; }
+  .node:hover rect.box { stroke-width: 2.5; }
+  .node.running rect.box { stroke: var(--running); } .node.running rect.bar { fill: var(--running); }
+  .node.running rect.box, .node.retrying rect.box { animation: glow 1.2s ease-in-out infinite; }
+  .node.retrying rect.box { stroke: var(--retrying); } .node.retrying rect.bar { fill: var(--retrying); }
+  .node.success rect.box { stroke: var(--success); } .node.success rect.bar { fill: var(--success); }
+  .node.cached rect.box { stroke: var(--cached); } .node.cached rect.bar { fill: var(--cached); }
+  .node.failed rect.box { stroke: var(--failed); } .node.failed rect.bar { fill: var(--failed); }
+  .node.cancelled rect.box { stroke: var(--cancelled); } .node.cancelled rect.bar { fill: var(--cancelled); }
+  .node.skipped, .node.idle { opacity: .45; }
+  .node.skipped rect.box { stroke-dasharray: 5 4; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 14px 12px; font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  .timeline { padding: 10px 14px 14px; }
+  .tl-row { display: grid; grid-template-columns: 150px 1fr 56px; align-items: center; gap: 10px; height: 26px; }
+  .tl-label { font-family: var(--mono); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .tl-track { position: relative; height: 14px; background: var(--panel-2); border-radius: 4px; }
+  .tl-bar { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--pending); min-width: 3px; transition: width .1s linear; }
+  .tl-bar.running { background: var(--running); } .tl-bar.retrying { background: var(--retrying); }
+  .tl-bar.success { background: var(--success); } .tl-bar.cached { background: var(--cached); }
+  .tl-bar.failed { background: var(--failed); } .tl-bar.cancelled { background: var(--cancelled); }
+  .tl-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--retrying); border-radius: 1px; }
+  .tl-dur { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
+  .tl-axis { display: grid; grid-template-columns: 150px 1fr 56px; gap: 10px; font: 11px var(--mono); color: var(--faint); margin-top: 4px; }
+  .tl-axis div { display: flex; justify-content: space-between; }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .details dl { display: grid; grid-template-columns: 100px 1fr; gap: 6px 10px; margin: 0; font-size: 13px; }
+  .details dt { color: var(--muted); } .details dd { margin: 0; overflow-wrap: anywhere; }
+  .details h3 { margin: 0 0 4px; font: 600 15px var(--mono); }
+  .details p.doc { margin: 0 0 12px; color: var(--muted); }
+  .state-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: var(--panel-2); border: 1px solid var(--border); }
+  pre.value { margin: 12px 0 0; padding: 10px; background: var(--panel-2); border-radius: 8px; font: 12px/1.5 var(--mono);
+    max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .err { color: var(--failed); }
+
+  .log { margin: 0; padding: 8px 0; list-style: none; font: 12.5px/1.6 var(--mono); max-height: 330px; overflow: auto; }
+  .log li { display: grid; grid-template-columns: 58px 16px 1fr; gap: 6px; padding: 0 14px; }
+  .log .t { color: var(--faint); text-align: right; }
+  .log .msg { overflow-wrap: anywhere; } .log .msg em { font-style: normal; color: var(--muted); }
+  .sym-task_started { color: var(--running); } .sym-task_retrying { color: var(--retrying); }
+  .sym-task_succeeded { color: var(--success); } .sym-task_cached { color: var(--cached); }
+  .sym-task_failed { color: var(--failed); } .sym-task_skipped { color: var(--skipped); }
+  .sym-task_cancelled { color: var(--cancelled); } .sym-run_started, .sym-run_finished { color: var(--accent); }
+
+  @keyframes pulse { 50% { opacity: .35; } }
+  @keyframes glow { 50% { stroke-opacity: .35; } }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } .split { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { main { padding: 12px; } header { padding: 10px 12px; } .wf-name { display: none; }
+    .tl-row, .tl-axis { grid-template-columns: 96px 1fr 48px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <circle cx="5" cy="6" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="12" r="2.5"/>
+      <path d="M7.5 6.5C12 7 13 11 16.5 11.6M7.5 17.5C12 17 13 13 16.5 12.4"/>
+    </svg>
+    dagflow
+  </div>
+  <span class="wf-name" id="wf-name"></span>
+  <span class="spacer"></span>
+  <span class="elapsed" id="elapsed"></span>
+  <span class="pill" id="status">idle</span>
+</header>
+
+<main>
+  <div class="col">
+    <section class="card">
+      <h2>Run</h2>
+      <form class="body" id="run-form" autocomplete="off">
+        <div id="params"></div>
+        <div id="tag-block" hidden>
+          <div class="muted" style="font-size:12px;margin-bottom:6px">Only tasks tagged <span class="muted">(optional)</span></div>
+          <div class="chips" id="tags"></div>
+        </div>
+        <button class="run-btn" id="run-btn" type="submit">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>
+          Run workflow <kbd>⌘↵</kbd>
+        </button>
+        <div class="form-error" id="form-error" role="alert"></div>
+      </form>
+    </section>
+    <section class="card">
+      <h2>History</h2>
+      <ul class="history" id="history"></ul>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card">
+      <h2>Graph <span class="hint">click a task for details</span></h2>
+      <div class="graph-wrap"><svg class="graph" id="graph" role="img" aria-label="Workflow dependency graph"></svg></div>
+      <div class="legend" id="legend"></div>
+    </section>
+    <section class="card">
+      <h2>Timeline <span class="hint">bars that overlap ran in parallel</span></h2>
+      <div class="timeline" id="timeline"></div>
+    </section>
+    <div class="split">
+      <section class="card details">
+        <h2>Task</h2>
+        <div class="body" id="details"></div>
+      </section>
+      <section class="card">
+        <h2>Event log</h2>
+        <ul class="log" id="log"></ul>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const NODE_W = 168, NODE_H = 50, GAP_X = 46, GAP_Y = 16, PAD = 12, MIN_SCALE = 0.85;
+const SYMBOL = { run_started: "◆", run_finished: "◆", task_started: "▶", task_retrying: "↻",
+  task_succeeded: "✓", task_cached: "●", task_failed: "✗", task_skipped: "⊘", task_cancelled: "■" };
+const STATE_LABEL = { idle: "not in run", pending: "waiting", running: "running", retrying: "retrying",
+  success: "succeeded", cached: "cached", failed: "failed", skipped: "skipped", cancelled: "cancelled" };
+
+const S = { wf: null, byName: {}, tasks: {}, run: null, events: [], t0: null, tEnd: null,
+  selected: null, source: null, history: [], tagsOn: new Set(), loadToken: 0, applied: 0 };
+const $ = (id) => document.getElementById(id);
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+function el(tag, attrs = {}, ...children) {
+  const svg = ["svg", "g", "rect", "text", "path", "title"].includes(tag);
+  const node = svg ? document.createElementNS("http://www.w3.org/2000/svg", tag) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.setAttribute("class", v);
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined) node.append(c);
+  return node;
+}
+
+const fmt = (s) => s == null ? "" : s < 10 ? s.toFixed(2) + "s" : s.toFixed(1) + "s";
+const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+
+// ---------- layout ----------
+function layout(wf) {
+  // Columns are the DAG layers; within a column, order by the average row of upstream
+  // tasks (barycenter heuristic) so edges cross as little as possible.
+  const row = {};
+  const cols = wf.layers.map((layer, ci) => {
+    const sorted = ci === 0 ? [...layer] : [...layer].sort((a, b) => bary(a) - bary(b) || a.localeCompare(b));
+    sorted.forEach((n, i) => { row[n] = i; });
+    return sorted;
+  });
+  function bary(name) {
+    const ups = S.byName[name].upstream.filter((u) => u in row);
+    return ups.length ? ups.reduce((s, u) => s + row[u], 0) / ups.length : 0;
+  }
+  const tallest = Math.max(1, ...cols.map((c) => c.length));
+  const height = PAD * 2 + tallest * NODE_H + (tallest - 1) * GAP_Y;
+  const pos = {}, colOf = {};
+  cols.forEach((col, ci) => {
+    col.forEach((n) => { colOf[n] = ci; });
+    const colH = col.length * NODE_H + (col.length - 1) * GAP_Y;
+    const top = (height - colH) / 2;
+    col.forEach((n, ri) => { pos[n] = { x: PAD + ci * (NODE_W + GAP_X), y: top + ri * (NODE_H + GAP_Y) }; });
+  });
+  return { pos, col: colOf, width: PAD * 2 + cols.length * NODE_W + (cols.length - 1) * GAP_X, height };
+}
+
+function drawGraph() {
+  const svg = $("graph");
+  const { pos, col, width, height } = layout(S.wf);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.dataset.width = width;
+  svg.dataset.height = height;
+  fitGraph();
+  svg.replaceChildren();
+  for (const [u, d] of S.wf.edges) {
+    const a = pos[u], b = pos[d];
+    const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2;
+    // Edges that skip columns run straight along the source row, then bend into the
+    // target in the last gap, so they don't cut through the boxes in between.
+    const bendX = col[d] - col[u] > 1 ? x2 - GAP_X : x1, mx = (bendX + x2) / 2;
+    svg.append(el("path", { class: "edge", "data-from": u, "data-to": d,
+      d: `M${x1},${y1} L${bendX},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 4},${y2}` }));
+  }
+  for (const t of S.wf.tasks) {
+    const p = pos[t.name];
+    svg.append(el("g", { class: "node", "data-task": t.name, transform: `translate(${p.x},${p.y})`,
+        tabindex: 0, role: "button", "aria-label": `Task ${t.name}`,
+        onclick: () => select(t.name), onkeydown: (e) => { if (e.key === "Enter") select(t.name); } },
+      el("title", {}, t.doc || t.name),
+      el("rect", { class: "box", width: NODE_W, height: NODE_H, rx: 9 }),
+      el("rect", { class: "bar", x: 0, y: 8, width: 4, height: NODE_H - 16, rx: 2 }),
+      el("text", { class: "name", x: 14, y: 21 }, clip(t.name, 19)),
+      el("text", { class: "sub", x: 14, y: 38 }, "")));
+  }
+  $("legend").replaceChildren(...["running", "retrying", "success", "cached", "failed", "skipped"].map((s) =>
+    el("span", {}, el("i", { style: `background: var(--${s})` }), STATE_LABEL[s])));
+}
+
+// Shrink wide graphs to fit, but never below MIN_SCALE: past that, scroll instead
+// so task names stay readable.
+function fitGraph() {
+  const svg = $("graph");
+  const width = +svg.dataset.width, height = +svg.dataset.height;
+  const avail = svg.parentElement.clientWidth - 16;
+  const scale = Math.min(1, Math.max(MIN_SCALE, avail / width));
+  svg.setAttribute("width", width * scale);
+  svg.setAttribute("height", height * scale);
+}
+window.addEventListener("resize", () => { if (S.wf) fitGraph(); });
+
+function metaLine(t) {
+  const bits = [t.is_async ? "async" : "sync"];
+  if (t.retries) bits.push(`${t.retries} retries`);
+  if (t.cache) bits.push("cache on");
+  if (t.timeout) bits.push(`${t.timeout}s timeout`);
+  return bits.join(" · ");
+}
+
+function paintGraph() {
+  for (const node of document.querySelectorAll(".node")) {
+    const name = node.dataset.task, st = S.tasks[name], spec = S.byName[name];
+    node.setAttribute("class", `node ${st.state}${S.selected === name ? " selected" : ""}`);
+    let sub = metaLine(spec);
+    if (st.state === "running") sub = st.attempts > 1 ? `running · attempt ${st.attempts}` : "running…";
+    else if (st.state === "retrying") sub = `retrying · ${st.attempts} failed`;
+    else if (["success", "failed", "cancelled"].includes(st.state))
+      sub = `${STATE_LABEL[st.state]} · ${fmt(st.duration)}${st.attempts > 1 ? ` · ${st.attempts} tries` : ""}`;
+    else if (st.state === "cached") sub = "cached result";
+    else if (st.state === "skipped") sub = "skipped";
+    node.querySelector("text.sub").textContent = sub;
+  }
+  for (const edge of document.querySelectorAll(".edge")) {
+    const up = S.tasks[edge.dataset.from].state, down = S.tasks[edge.dataset.to].state;
+    edge.setAttribute("class", "edge" + (["success", "cached"].includes(up) ? " live" : "")
+      + (["skipped", "idle"].includes(down) ? " dim" : ""));
+  }
+}
+
+// ---------- run state ----------
+function resetTasks(state) {
+  S.tasks = {};
+  for (const t of S.wf.tasks) S.tasks[t.name] = { state, attempts: 0, start: null, end: null, duration: null, error: null, retries: [] };
+  S.events = []; S.t0 = null; S.tEnd = null;
+  $("log").replaceChildren();
+}
+
+function apply(e) {
+  S.events.push(e);
+  const t = e.task && S.tasks[e.task];
+  switch (e.type) {
+    case "run_started": S.t0 = e.timestamp; break;
+    case "run_finished": S.tEnd = e.timestamp; break;
+    case "task_started": Object.assign(t, { state: "running", attempts: e.attempt }); t.start ??= e.timestamp; break;
+    case "task_retrying": Object.assign(t, { state: "retrying", error: e.error }); t.retries.push(e.timestamp); break;
+    case "task_succeeded": Object.assign(t, { state: "success", end: e.timestamp, duration: e.duration, error: null }); break;
+    case "task_cached": Object.assign(t, { state: "cached", start: e.timestamp, end: e.timestamp, duration: e.duration }); break;
+    case "task_failed": Object.assign(t, { state: "failed", end: e.timestamp, duration: e.duration, error: e.error }); break;
+    case "task_skipped": Object.assign(t, { state: "skipped", error: e.detail }); break;
+    case "task_cancelled": Object.assign(t, { state: "cancelled", end: e.timestamp, error: e.detail }); break;
+  }
+  logLine(e);
+}
+
+function logLine(e) {
+  const off = S.t0 ? "+" + (e.timestamp - S.t0).toFixed(2) + "s" : "";
+  let msg;
+  if (e.type === "run_started") msg = [el("b", {}, "run started")];
+  else if (e.type === "run_finished") msg = [el("b", {}, `run ${e.detail}`), el("em", {}, ` in ${fmt(e.duration)}`)];
+  else {
+    msg = [e.task];
+    if (e.type === "task_started" && e.attempt > 1) msg.push(el("em", {}, ` attempt ${e.attempt}`));
+    if (e.duration != null && e.type !== "task_retrying") msg.push(el("em", {}, ` ${fmt(e.duration)}`));
+    if (e.error) msg.push(el("span", { class: "err" }, ` — ${e.error}`));
+    if (e.detail && e.type !== "task_failed") msg.push(el("em", {}, ` [${e.detail}]`));
+  }
+  const log = $("log");
+  const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+  log.append(el("li", {}, el("span", { class: "t" }, off), el("span", { class: `sym-${e.type}` }, SYMBOL[e.type] || "·"),
+    el("span", { class: "msg" }, ...msg)));
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+
+function paintTimeline() {
+  const box = $("timeline");
+  if (!S.t0) { box.replaceChildren(el("div", { class: "empty" }, "Run the workflow to see when each task ran.")); return; }
+  const now = S.tEnd ?? Date.now() / 1000;
+  const total = Math.max(now - S.t0, 0.05);
+  const rows = S.wf.tasks.filter((t) => S.tasks[t.name].start != null).sort((a, b) => S.tasks[a.name].start - S.tasks[b.name].start);
+  box.replaceChildren(...rows.map((spec) => {
+    const st = S.tasks[spec.name];
+    const end = st.end ?? now;
+    const left = ((st.start - S.t0) / total) * 100, width = ((end - st.start) / total) * 100;
+    return el("div", { class: "tl-row" },
+      el("div", { class: "tl-label", onclick: () => select(spec.name), title: spec.name }, spec.name),
+      el("div", { class: "tl-track" },
+        el("div", { class: `tl-bar ${st.state}`, style: `left:${left}%;width:${width}%` }),
+        ...st.retries.map((ts) => el("div", { class: "tl-tick", title: "retry", style: `left:${((ts - S.t0) / total) * 100}%` }))),
+      el("div", { class: "tl-dur" }, fmt(end - st.start)));
+  }), el("div", { class: "tl-axis" }, el("span"), el("div", {}, el("span", {}, "0s"), el("span", {}, fmt(total / 2)), el("span", {}, fmt(total))), el("span")));
+}
+
+function paintDetails() {
+  const box = $("details");
+  const name = S.selected;
+  if (!name) { box.replaceChildren(el("div", { class: "empty" }, "Select a task in the graph to see its settings and result.")); return; }
+  const spec = S.byName[name], st = S.tasks[name];
+  const result = S.run?.result?.tasks?.[name];
+  const rows = [
+    ["state", el("span", { class: "state-badge", style: `color: var(--${st.state === "idle" ? "faint" : st.state})` }, STATE_LABEL[st.state])],
+    ["depends on", spec.upstream.length ? spec.upstream.join(", ") : "—"],
+    ["runs as", spec.is_async ? "async (event loop)" : "sync (worker thread)"],
+    ["retries", String(spec.retries)],
+    ["timeout", spec.timeout ? `${spec.timeout}s` : "none"],
+    ["cache", spec.cache ? "yes" : "no"],
+    ["tags", spec.tags.length ? spec.tags.join(", ") : "—"],
+  ];
+  if (st.attempts) rows.push(["attempts", String(st.attempts)]);
+  if (st.duration != null) rows.push(["duration", fmt(st.duration)]);
+  if (st.error) rows.push(["last error", el("span", { class: st.state === "skipped" ? "muted" : "err" }, st.error)]);
+  const children = [el("h3", {}, name)];
+  if (spec.doc) children.push(el("p", { class: "doc" }, spec.doc));
+  children.push(el("dl", {}, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])));
+  if (result && result.value !== null && result.value !== undefined) {
+    const text = JSON.stringify(result.value, null, 2);
+    children.push(el("pre", { class: "value", "aria-label": "Result value" }, clip(text, 6000)));
+  }
+  box.replaceChildren(...children);
+}
+
+function paintStatus() {
+  const status = S.run ? S.run.status : "idle";
+  const pill = $("status");
+  pill.className = `pill ${status}`;
+  pill.textContent = status;
+  $("elapsed").textContent = S.t0 ? fmt((S.tEnd ?? Date.now() / 1000) - S.t0) : "";
+  $("run-btn").disabled = status === "running";
+}
+
+function paint() { paintGraph(); paintTimeline(); paintDetails(); paintStatus(); }
+
+function select(name) { S.selected = name; paintGraph(); paintDetails(); }
+
+// ---------- form & history ----------
+function buildForm() {
+  const box = $("params");
+  if (!S.wf.params.length) box.append(el("div", { class: "empty" }, "This workflow takes no parameters."));
+  for (const p of S.wf.params) {
+    const id = `param-${p.name}`;
+    box.append(el("div", { class: "field" },
+      el("label", { for: id }, p.name, p.required ? el("span", { class: "req" }, "required") : null),
+      el("input", { id, name: p.name, required: p.required || null,
+        placeholder: !("default" in p) ? "" : typeof p.default === "string" ? p.default : JSON.stringify(p.default) }),
+      el("small", {}, `used by ${p.used_by.join(", ")}`)));
+  }
+  if (S.wf.tags.length) {
+    $("tag-block").hidden = false;
+    $("tags").replaceChildren(...S.wf.tags.map((tag) => el("button", { type: "button", class: "chip", "aria-pressed": "false",
+      onclick: (e) => { S.tagsOn.has(tag) ? S.tagsOn.delete(tag) : S.tagsOn.add(tag);
+        e.currentTarget.setAttribute("aria-pressed", String(S.tagsOn.has(tag))); } }, tag)));
+  }
+}
+
+async function startRun(ev) {
+  ev?.preventDefault();
+  $("form-error").textContent = "";
+  const params = {};
+  for (const input of $("params").querySelectorAll("input")) if (input.value.trim()) params[input.name] = input.value.trim();
+  try {
+    const run = await api("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ params, tags: [...S.tagsOn] }) });
+    await loadRun(run.id);
+  } catch (err) { $("form-error").textContent = err.message; }
+  refreshHistory();
+}
+
+async function refreshHistory() {
+  try { S.history = await api("/api/runs"); }
+  catch (err) { $("form-error").textContent = `Lost connection to the dagflow server (${err.message}).`; return; }
+  const list = $("history");
+  if (!S.history.length) { list.replaceChildren(el("li", { class: "empty", style: "padding:6px 8px" }, "No runs yet.")); return; }
+  list.replaceChildren(...S.history.map((r) => {
+    const when = new Date(r.started * 1000).toLocaleTimeString();
+    const extra = Object.entries(r.params).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ");
+    return el("li", {}, el("button", { "aria-current": String(S.run?.id === r.id), onclick: () => loadRun(r.id) },
+      el("span", { class: `dot ${r.status}` }),
+      el("span", {}, `Run #${r.id} `, el("span", { class: "meta" }, extra)),
+      el("span", { class: "meta" }, r.duration != null ? fmt(r.duration) : when)));
+  }));
+}
+
+async function loadRun(id) {
+  // Clicks can overlap; only the most recent load may take over the view.
+  const token = ++S.loadToken;
+  const run = await api(`/api/runs/${id}`);
+  if (token !== S.loadToken) return;
+  S.source?.close();
+  S.source = null;
+  S.run = run;
+  resetTasks("idle");
+  // Only tasks in the run's selected subgraph will run; the rest stay "not in run".
+  for (const name of run.tasks) if (S.tasks[name]) S.tasks[name].state = "pending";
+  run.events.forEach(apply);
+  S.applied = run.events.length;
+  if (run.status === "running") follow(run.id);
+  else finish(run);
+  paint(); refreshHistory();
+}
+
+function follow(id) {
+  const source = new EventSource(`/api/runs/${id}/events`);
+  S.source = source;
+  const stale = () => S.source !== source;
+  source.onmessage = (msg) => {
+    if (stale()) { source.close(); return; }
+    // Event ids are 1-based positions. The stream replays from the start on the
+    // first connect, so skip what loadRun already applied (and any repeats).
+    const n = Number(msg.lastEventId);
+    if (n <= S.applied) return;
+    S.applied = n;
+    apply(JSON.parse(msg.data));
+    paint();
+  };
+  source.addEventListener("end", async () => {
+    source.close();
+    if (stale()) return;
+    const run = await api(`/api/runs/${id}`);
+    if (!stale()) { S.run = run; finish(run); paint(); }
+    refreshHistory();
+  });
+  source.onerror = () => { if (source.readyState === EventSource.CLOSED) refreshHistory(); };
+}
+
+function finish(run) {
+  for (const st of Object.values(S.tasks)) if (st.state === "pending") st.state = "idle";
+  if (run.error) $("form-error").textContent = run.error;
+}
+
+setInterval(() => { if (S.run?.status === "running") { paintTimeline(); paintStatus(); } }, 100);
+document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") startRun(e); });
+$("run-form").addEventListener("submit", startRun);
+
+(async function init() {
+  S.wf = await api("/api/workflow");
+  S.byName = Object.fromEntries(S.wf.tasks.map((t) => [t.name, t]));
+  $("wf-name").textContent = S.wf.name;
+  document.title = `${S.wf.name} · dagflow`;
+  buildForm();
+  drawGraph();
+  resetTasks("idle");
+  paint();
+  await refreshHistory();
+  if (S.history.length) loadRun(S.history[0].id);
+})().catch((err) => { $("form-error").textContent = `Could not load the workflow: ${err.message}`; });
+</script>
+</body>
+</html>

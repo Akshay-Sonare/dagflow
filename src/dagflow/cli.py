@@ -1,4 +1,4 @@
-"""Command-line interface: ``dagflow run | graph | plan <file.py:workflow>``."""
+"""Command-line interface: ``dagflow run | graph | plan | ui <file.py:workflow>``."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import sys
+import webbrowser
 from pathlib import Path
 from typing import Any, ClassVar, TextIO
 
@@ -16,6 +17,7 @@ from dagflow.cache import SQLiteCache
 from dagflow.errors import DagflowError
 from dagflow.events import Event, EventType
 from dagflow.executor import RunResult, TaskState
+from dagflow.server import Dashboard, DashboardServer, coerce_param, is_loopback
 from dagflow.workflow import Workflow
 
 
@@ -58,10 +60,7 @@ def parse_param(raw: str) -> tuple[str, Any]:
     key, sep, value = raw.partition("=")
     if not sep or not key.isidentifier():
         raise argparse.ArgumentTypeError(f"expected key=value, got {raw!r}")
-    try:
-        return key, json.loads(value)
-    except json.JSONDecodeError:
-        return key, value
+    return key, coerce_param(value)
 
 
 class ConsoleReporter:
@@ -165,6 +164,35 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ui(args: argparse.Namespace) -> int:
+    wf = load_workflow(args.workflow)
+    cache = SQLiteCache(args.cache) if args.cache else None
+    dashboard = Dashboard(wf, cache=cache, max_concurrency=args.jobs)
+    try:
+        server = DashboardServer(dashboard, args.host, args.port, verbose=args.verbose)
+    except OSError as exc:
+        raise DagflowError(f"cannot listen on {args.host}:{args.port}: {exc}") from None
+    print(f"dagflow dashboard for {wf.name!r} at {server.url}  (Ctrl+C to stop)", file=sys.stderr)
+    if not is_loopback(args.host):
+        print(
+            f"warning: listening on {args.host}, not just this computer. Anyone who can reach\n"
+            "this port can run the workflow with any parameters and read every result.\n"
+            "The dashboard has no login; only do this on a network you trust.",
+            file=sys.stderr,
+        )
+    if not args.no_browser:
+        webbrowser.open(server.url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped", file=sys.stderr)
+    finally:
+        server.server_close()
+        if cache is not None:
+            cache.close()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dagflow", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -199,6 +227,18 @@ def build_parser() -> argparse.ArgumentParser:
     plan = sub.add_parser("plan", help="show execution stages without running")
     common(plan)
     plan.set_defaults(handler=_cmd_plan)
+
+    ui = sub.add_parser("ui", help="open a live web dashboard for a workflow")
+    ui.add_argument("workflow", help="path/to/file.py[:name] or module[:name]")
+    ui.add_argument(
+        "--host", default="127.0.0.1", help="interface to bind (default: localhost only)"
+    )
+    ui.add_argument("--port", type=int, default=8765)
+    ui.add_argument("-j", "--jobs", type=int, default=8, help="max concurrent tasks per run")
+    ui.add_argument("--cache", metavar="PATH", help="SQLite file for cached task results")
+    ui.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
+    ui.add_argument("-v", "--verbose", action="store_true", help="log every HTTP request")
+    ui.set_defaults(handler=_cmd_ui)
     return parser
 
 
