@@ -53,6 +53,7 @@ print(result["revenue"])
 | **Tag filters** | `tags=[...]` / `-T tag` runs every task carrying a tag, plus what it depends on. Combines with `targets`. |
 | **Observability** | Typed lifecycle events on a pub/sub bus; the CLI's live reporter is just one listener. |
 | **Visualisation** | Export the graph as Mermaid or Graphviz DOT. |
+| **Web dashboard** | `dagflow ui` serves a live, zero-dependency dashboard: graph, timeline, task inspector and run history. |
 
 ## Install
 
@@ -99,6 +100,39 @@ dagflow run   examples/sales_report.py -t revenue_by_customer --json
 dagflow run   pipeline.py -T nightly                # every task tagged "nightly" + its deps
 ```
 
+## Web dashboard
+
+```bash
+dagflow ui examples/sales_report.py
+```
+
+Opens a local dashboard (http://127.0.0.1:8765) where you can:
+
+- **See the graph**: tasks laid out by stage, so anything in the same column can run in parallel.
+- **Run it**: fill in parameters (required ones are marked), optionally filter by tag, and hit
+  **Run** (or ⌘/Ctrl+Enter).
+- **Watch it live**: each task lights up as it starts, retries, succeeds, fails or is skipped,
+  streamed from the server over Server-Sent Events.
+- **Read the timeline**: a Gantt chart of when each task ran, with ticks marking retries, so
+  you can see exactly what overlapped.
+- **Inspect tasks**: click any task for its docstring, settings, attempts, errors and the
+  actual value it returned.
+- **Browse history**: recent runs are kept in memory; click one to replay it.
+
+It is built with the standard library only (`http.server` plus a single HTML page with no
+build step), so `dagflow` still has zero runtime dependencies. It binds to localhost by
+default; useful flags are `--port`, `--cache results.db`, `-j` and `--no-browser`.
+
+The JSON API behind it is usable on its own:
+
+| Method | Path | |
+|---|---|---|
+| `GET` | `/api/workflow` | tasks, edges, stages, parameters, tags |
+| `POST` | `/api/runs` | start a run: `{"params": {...}, "tags": [...], "targets": [...]}` |
+| `GET` | `/api/runs` | recent runs, newest first |
+| `GET` | `/api/runs/<id>` | one run with all its events and results |
+| `GET` | `/api/runs/<id>/events` | live `text/event-stream` of events |
+
 The example's graph, as produced by `dagflow graph`:
 
 ```mermaid
@@ -129,7 +163,9 @@ src/dagflow/
 ├── cache.py      Cache Protocol, MemoryCache, SQLiteCache, deterministic cache keys
 ├── events.py     Event types and EventBus
 ├── errors.py     Exception hierarchy rooted at DagflowError
-└── cli.py        argparse CLI and live console reporter
+├── cli.py        argparse CLI and live console reporter
+├── server.py     web dashboard: run threads, JSON API, Server-Sent Events
+└── ui/index.html the dashboard page (vanilla JS + SVG, no build step)
 ```
 
 How a run works:

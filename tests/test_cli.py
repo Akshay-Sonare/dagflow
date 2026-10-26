@@ -1,5 +1,6 @@
 import argparse
 import json
+import socket
 from pathlib import Path
 
 import pytest
@@ -126,3 +127,12 @@ def test_example_workflow_runs(tmp_path: Path, capsys: pytest.CaptureFixture[str
     assert code == 0
     assert "Top customers (EU)" in out
     assert "↻ orders" in err  # the flaky task was retried
+
+
+def test_ui_reports_busy_port(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        port = busy.getsockname()[1]
+        assert main(["ui", str(wf_file), "--port", str(port), "--no-browser"]) == 2
+    assert "cannot listen" in capsys.readouterr().err

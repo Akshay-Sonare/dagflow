@@ -4,6 +4,7 @@ Run it with:
 
     dagflow run examples/sales_report.py -p region=EU -p top_n=3
     dagflow graph examples/sales_report.py
+    dagflow ui examples/sales_report.py
 """
 
 from __future__ import annotations
@@ -31,9 +32,11 @@ async def customers(region: str = "EU") -> list[dict[str, Any]]:
 
 @workflow.task(retries=3, backoff=0.1, retry_on=(ConnectionError,), tags={"extract"})
 async def orders() -> list[dict[str, Any]]:
-    """A flaky upstream: the first two calls fail, the retry policy rides it out."""
+    """A flaky upstream: two of every three calls fail, the retry policy rides it out."""
     await asyncio.sleep(0.2)
-    if next(_order_api_calls) < 3:
+    # Modulo, not "first two calls", so the demo stays flaky on every run of a
+    # long-lived process such as `dagflow ui`.
+    if next(_order_api_calls) % 3:
         raise ConnectionError("orders API returned 503")
     return [
         {"customer_id": cid, "amount": amount, "currency": cur}
