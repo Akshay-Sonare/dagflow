@@ -9,6 +9,7 @@ the same dependency-injection style pytest uses for fixtures.
 from __future__ import annotations
 
 import inspect
+import random
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, overload
@@ -29,6 +30,7 @@ class RetryPolicy:
     backoff: float = 0.0
     multiplier: float = 2.0
     max_backoff: float = 60.0
+    jitter: float = 0.0
     retry_on: tuple[type[BaseException], ...] = (Exception,)
 
     def __post_init__(self) -> None:
@@ -38,10 +40,13 @@ class RetryPolicy:
             raise ValueError("backoff values must be >= 0")
         if self.multiplier < 1:
             raise ValueError("multiplier must be >= 1")
+        if not 0 <= self.jitter <= 1:
+            raise ValueError("jitter must be between 0 and 1")
 
     def delay(self, attempt: int) -> float:
         """Seconds to wait after failed ``attempt`` (1-based) before the next one."""
-        return float(min(self.backoff * self.multiplier ** (attempt - 1), self.max_backoff))
+        base = min(self.backoff * self.multiplier ** (attempt - 1), self.max_backoff)
+        return float(base * (1 - self.jitter * random.random()))
 
     def should_retry(self, error: BaseException, attempt: int) -> bool:
         return attempt < self.max_attempts and isinstance(error, self.retry_on)
@@ -103,6 +108,7 @@ def task(
     name: str | None = None,
     retries: int = 0,
     backoff: float = 0.0,
+    jitter: float = 0.0,
     retry_on: Iterable[type[BaseException]] = (Exception,),
     timeout: float | None = None,
     cache: bool = False,
@@ -118,6 +124,7 @@ def task(
     name: str | None = None,
     retries: int = 0,
     backoff: float = 0.0,
+    jitter: float = 0.0,
     retry_on: Iterable[type[BaseException]] = (Exception,),
     timeout: float | None = None,
     cache: bool = False,
@@ -130,6 +137,7 @@ def task(
         name: Task name; defaults to the function name.
         retries: Extra attempts after the first failure.
         backoff: Initial delay between attempts, doubled after each failure.
+        jitter: Fraction (0-1) of each delay that may be randomly shaved off.
         retry_on: Exception types that trigger a retry.
         timeout: Per-attempt timeout in seconds.
         cache: Reuse results for identical inputs when the run has a cache.
@@ -142,7 +150,9 @@ def task(
             fn=func,
             name=name or func.__name__,
             after=_names(after),
-            retry=RetryPolicy(max_attempts=retries + 1, backoff=backoff, retry_on=tuple(retry_on)),
+            retry=RetryPolicy(
+                max_attempts=retries + 1, backoff=backoff, jitter=jitter, retry_on=tuple(retry_on)
+            ),
             timeout=timeout,
             cache=cache,
             tags=frozenset(tags),

@@ -164,6 +164,28 @@ def test_retry_policy_backoff(attempt: int, expected: float) -> None:
     assert policy.delay(attempt) == expected
 
 
+def test_retry_policy_jitter_shortens_delay_within_bounds() -> None:
+    policy = RetryPolicy(max_attempts=5, backoff=1.0, jitter=0.5)
+    delays = {policy.delay(2) for _ in range(50)}
+    assert len(delays) > 1
+    assert all(1.0 <= d <= 2.0 for d in delays)
+
+
+def _noop() -> None:
+    return None
+
+
+def test_retry_policy_jitter_validation() -> None:
+    with pytest.raises(ValueError, match="jitter"):
+        RetryPolicy(jitter=1.5)
+    with pytest.raises(ValueError, match="jitter"):
+        task(jitter=-0.1)(_noop)
+
+
+def test_task_decorator_passes_jitter() -> None:
+    assert task(retries=2, backoff=1, jitter=0.3)(_noop).retry.jitter == 0.3
+
+
 def test_retry_policy_filters_exceptions() -> None:
     policy = RetryPolicy(max_attempts=3, retry_on=(ConnectionError,))
     assert policy.should_retry(ConnectionError(), 1)
