@@ -152,3 +152,29 @@ def test_ui_warns_when_exposed_beyond_localhost(
     monkeypatch.setattr("dagflow.cli.DashboardServer.serve_forever", stop_immediately)
     assert main(["ui", str(wf_file), "--host", host, "--port", "0", "--no-browser"]) == 0
     assert ("warning: listening on" in capsys.readouterr().err) is warned
+
+
+def test_run_dry_run_executes_nothing(
+    wf_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "ran"
+    src = wf_file.read_text() + f"\n@workflow.task\ndef side(): open({str(marker)!r}, 'w')\n"
+    wf_file.write_text(src)
+    assert main(["run", str(wf_file), "--dry-run"]) == 0
+    out = capsys.readouterr()
+    assert "stage 1: numbers, side" in out.out
+    assert "nothing was executed" in out.err
+    assert not marker.exists()
+
+
+def test_run_dry_run_reports_missing_params(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "needs.py"
+    path.write_text(
+        "from dagflow import Workflow\nworkflow = Workflow('n')\n"
+        "@workflow.task\ndef a(region): return region\n"
+    )
+    assert main(["run", str(path), "--dry-run"]) == 2
+    assert "region" in capsys.readouterr().err
+    assert main(["run", str(path), "--dry-run", "-p", "region=EU"]) == 0
