@@ -107,3 +107,38 @@ def test_key_is_stable_across_separately_compiled_code() -> None:
 
 def test_unhashable_inputs_disable_caching() -> None:
     assert cache_key(add, {"a": lambda: None}) is None
+
+
+def test_memory_cache_evicts_least_recently_used() -> None:
+    cache = MemoryCache(max_size=2)
+    cache.set("a", 1)
+    cache.set("b", 2)
+    assert cache.get("a") == 1  # touching "a" makes "b" the eviction candidate
+    cache.set("c", 3)
+    assert cache.get("b") is MISSING
+    assert cache.get("a") == 1
+    assert cache.get("c") == 3
+    assert len(cache) == 2
+
+
+def test_memory_cache_ttl_expires_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [100.0]
+    monkeypatch.setattr("dagflow.cache.time.monotonic", lambda: now[0])
+    cache = MemoryCache(ttl=10)
+    cache.set("k", "v")
+    now[0] += 9
+    assert cache.get("k") == "v"
+    now[0] += 2
+    assert cache.get("k") is MISSING
+    assert len(cache) == 0
+
+
+def test_memory_cache_clear_and_validation() -> None:
+    cache = MemoryCache()
+    cache.set("k", 1)
+    cache.clear()
+    assert len(cache) == 0
+    with pytest.raises(ValueError, match="ttl"):
+        MemoryCache(ttl=0)
+    with pytest.raises(ValueError, match="max_size"):
+        MemoryCache(max_size=0)
