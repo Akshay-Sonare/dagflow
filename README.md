@@ -97,6 +97,7 @@ dagflow plan  examples/sales_report.py              # execution stages + require
 dagflow graph examples/sales_report.py              # Mermaid diagram
 dagflow graph examples/sales_report.py -f dot | dot -Tpng > graph.png
 dagflow run   examples/sales_report.py -t revenue_by_customer --json
+dagflow run   examples/sales_report.py --dry-run -p region=EU  # validate params + show stages, run nothing
 dagflow run   pipeline.py -T nightly                # every task tagged "nightly" + its deps
 ```
 

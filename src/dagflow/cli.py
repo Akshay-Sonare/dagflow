@@ -120,6 +120,8 @@ def format_summary(result: RunResult) -> str:
 
 def _cmd_run(args: argparse.Namespace) -> int:
     wf = load_workflow(args.workflow)
+    if args.dry_run:
+        return _dry_run(wf, args)
     listeners = [] if args.quiet else [ConsoleReporter()]
     cache = SQLiteCache(args.cache) if args.cache else None
     try:
@@ -140,6 +142,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         print(format_summary(result), file=sys.stderr)
     return 0 if result.ok else 1
+
+
+def _dry_run(wf: Workflow, args: argparse.Namespace) -> int:
+    """Validate against the given params and print the stages without running anything."""
+    targets, tags = args.target or None, args.tag or None
+    wf.validate(dict(args.param), targets=targets, tags=tags)
+    for i, layer in enumerate(wf.plan(targets=targets, tags=tags), start=1):
+        print(f"stage {i}: {', '.join(layer)}")
+    print("\ndry run: validation passed, nothing was executed", file=sys.stderr)
+    return 0
 
 
 def _cmd_graph(args: argparse.Namespace) -> int:
@@ -216,6 +228,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--cache", metavar="PATH", help="SQLite file for cached task results")
     run.add_argument("--fail-fast", action="store_true", help="cancel everything on failure")
     run.add_argument("--json", action="store_true", help="print results as JSON on stdout")
+    run.add_argument(
+        "--dry-run", action="store_true", help="validate params and print the plan; run nothing"
+    )
     run.add_argument("-q", "--quiet", action="store_true", help="no live progress output")
     run.set_defaults(handler=_cmd_run)
 
