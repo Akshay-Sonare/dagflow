@@ -11,6 +11,7 @@ import pickle
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Mapping
 from enum import Enum
 from types import CodeType, TracebackType
@@ -42,22 +43,48 @@ class Cache(Protocol):
 
 
 class MemoryCache:
-    """Thread-safe in-process cache. Results last as long as the object."""
+    """Thread-safe in-process cache. Results last as long as the object.
 
-    def __init__(self) -> None:
-        self._data: dict[str, Any] = {}
+    ``ttl`` expires entries that many seconds after they were stored; ``max_size`` keeps
+    only the most recently used entries, evicting the least recently used first.
+    """
+
+    def __init__(self, *, ttl: float | None = None, max_size: int | None = None) -> None:
+        if ttl is not None and ttl <= 0:
+            raise ValueError("ttl must be > 0")
+        if max_size is not None and max_size < 1:
+            raise ValueError("max_size must be >= 1")
+        self.ttl = ttl
+        self.max_size = max_size
+        self._data: OrderedDict[str, tuple[Any, float]] = OrderedDict()
         self._lock = threading.Lock()
 
     def get(self, key: str) -> Any:
         with self._lock:
-            return self._data.get(key, MISSING)
+            entry = self._data.get(key)
+            if entry is None:
+                return MISSING
+            value, stored = entry
+            if self.ttl is not None and time.monotonic() - stored > self.ttl:
+                del self._data[key]
+                return MISSING
+            self._data.move_to_end(key)
+            return value
 
     def set(self, key: str, value: Any) -> None:
         with self._lock:
-            self._data[key] = value
+            self._data[key] = (value, time.monotonic())
+            self._data.move_to_end(key)
+            while self.max_size is not None and len(self._data) > self.max_size:
+                self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
 
     def __len__(self) -> int:
-        return len(self._data)
+        with self._lock:
+            return len(self._data)
 
 
 class SQLiteCache:
