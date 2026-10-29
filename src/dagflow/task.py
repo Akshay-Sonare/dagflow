@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import random
+import typing
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, overload
@@ -17,6 +18,24 @@ from typing import Any, overload
 TaskFn = Callable[..., Any]
 
 _KEYWORD_KINDS = (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+
+
+@dataclass(frozen=True, slots=True)
+class Context:
+    """Run metadata a task can receive by annotating one parameter with ``Context``.
+
+    The parameter can have any name and is not part of the task's data inputs: it is never
+    matched against tasks or params and does not affect cache keys.
+    """
+
+    run_id: str
+    task: str
+    attempt: int
+    max_attempts: int
+
+    @property
+    def is_retry(self) -> bool:
+        return self.attempt > 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +85,7 @@ class Task:
     cache: bool = False
     tags: frozenset[str] = frozenset()
     signature: inspect.Signature = field(init=False, repr=False)
+    context_param: str | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if not self.name.isidentifier():
@@ -79,6 +99,7 @@ class Task:
                     f"task {self.name!r}: parameter {param.name!r} must be passable by keyword"
                 )
         object.__setattr__(self, "signature", signature)
+        object.__setattr__(self, "context_param", _find_context_param(self.fn, signature))
 
     @property
     def is_async(self) -> bool:
@@ -86,14 +107,29 @@ class Task:
 
     @property
     def inputs(self) -> tuple[str, ...]:
-        """Names of every parameter the task accepts."""
-        return tuple(self.signature.parameters)
+        """Names of the parameters filled from task results and run params."""
+        return tuple(p for p in self.signature.parameters if p != self.context_param)
 
     def has_default(self, param: str) -> bool:
         return self.signature.parameters[param].default is not inspect.Parameter.empty
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.fn(*args, **kwargs)
+
+
+def _find_context_param(fn: TaskFn, signature: inspect.Signature) -> str | None:
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:  # unresolvable forward references: fall back to the raw annotation
+        hints = {}
+    found = [
+        name
+        for name, param in signature.parameters.items()
+        if hints.get(name, param.annotation) in (Context, "Context", "dagflow.Context")
+    ]
+    if len(found) > 1:
+        raise TypeError(f"task {fn.__name__!r} has several Context parameters: {found}")
+    return found[0] if found else None
 
 
 def _names(items: Iterable[str | Task]) -> tuple[str, ...]:

@@ -42,6 +42,7 @@ print(result["revenue"])
 | | |
 |---|---|
 | **Dependency injection** | Parameters named after tasks receive their results (pytest-fixture style); other parameters come from run params or defaults. |
+| **Run context** | Annotate a parameter with `dagflow.Context` to get the run id, task name and attempt number (`ctx.attempt`, `ctx.max_attempts`, `ctx.is_retry`). It is not a data input and doesn't affect cache keys. |
 | **Event-driven scheduler** | A task starts the instant its last dependency finishes, not when a whole "layer" is done. Bounded by a concurrency semaphore. |
 | **Sync + async** | `async def` tasks are awaited; blocking functions are moved to threads automatically. |
 | **Retries** | Exponential back-off with a cap and exception filtering. Back-off sleeps don't hold a concurrency slot. |

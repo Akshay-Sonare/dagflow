@@ -100,7 +100,7 @@ def describe_workflow(workflow: Workflow) -> dict[str, Any]:
     for item in workflow:
         upstream = sorted(dag.upstream(item.name))
         for name, param in item.signature.parameters.items():
-            if name in workflow:
+            if name in workflow or name == item.context_param:
                 continue
             entry = params.setdefault(name, {"name": name, "required": False, "used_by": []})
             entry["used_by"].append(item.name)

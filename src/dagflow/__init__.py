@@ -19,7 +19,7 @@ from dagflow.errors import (
 from dagflow.events import Event, EventBus, EventType, Listener
 from dagflow.executor import Executor, RunResult, TaskResult, TaskState
 from dagflow.graph import DAG
-from dagflow.task import RetryPolicy, Task, task
+from dagflow.task import Context, RetryPolicy, Task, task
 from dagflow.workflow import Workflow
 
 __version__ = "0.1.0"
@@ -28,6 +28,7 @@ __all__ = [
     "DAG",
     "MISSING",
     "Cache",
+    "Context",
     "CycleError",
     "DagflowError",
     "DuplicateTaskError",

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -20,7 +21,7 @@ from dagflow.cache import MISSING, Cache, cache_key
 from dagflow.errors import TaskFailedError, TaskTimeoutError
 from dagflow.events import Event, EventBus, EventType
 from dagflow.graph import DAG
-from dagflow.task import Task
+from dagflow.task import Context, Task
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ class Executor:
         params: Mapping[str, Any],
     ) -> RunResult:
         started = time.perf_counter()
+        run_id = uuid.uuid4().hex[:12]
         order = dag.topological_order()  # also rejects cycles before anything runs
         run = RunResult(workflow, {name: TaskResult(name) for name in order})
         waiting_on = {name: len(dag.upstream(name)) for name in order}
@@ -133,7 +135,7 @@ class Executor:
 
         def launch(name: str) -> None:
             inputs = self._inputs(tasks[name], run.results, params)
-            coro = self._run_task(tasks[name], inputs, semaphore)
+            coro = self._run_task(tasks[name], inputs, semaphore, run_id)
             running[asyncio.create_task(coro, name=f"dagflow:{name}")] = name
 
         self.bus.emit(Event(EventType.RUN_STARTED, detail=workflow))
@@ -213,7 +215,7 @@ class Executor:
                 self._skip([name], results, cause="fail-fast")
 
     async def _run_task(
-        self, task: Task, inputs: dict[str, Any], semaphore: asyncio.Semaphore
+        self, task: Task, inputs: dict[str, Any], semaphore: asyncio.Semaphore, run_id: str
     ) -> TaskResult:
         result = TaskResult(task.name)
         started = time.perf_counter()
@@ -236,8 +238,12 @@ class Executor:
             result.attempts += 1
             self.bus.emit(Event(EventType.TASK_STARTED, task.name, attempt=result.attempts))
             try:
+                call_inputs = inputs
+                if task.context_param is not None:
+                    ctx = Context(run_id, task.name, result.attempts, task.retry.max_attempts)
+                    call_inputs = {**inputs, task.context_param: ctx}
                 async with semaphore:
-                    value = await self._invoke(task, inputs)
+                    value = await self._invoke(task, call_inputs)
             except Exception as exc:
                 if task.retry.should_retry(exc, result.attempts):
                     delay = task.retry.delay(result.attempts)
