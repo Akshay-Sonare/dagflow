@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from dagflow import (
+    Context,
     Event,
     EventType,
     MemoryCache,
@@ -13,6 +14,7 @@ from dagflow import (
     TaskState,
     TaskTimeoutError,
     Workflow,
+    task,
 )
 
 
@@ -313,3 +315,51 @@ def test_cache_read_failure_is_treated_as_a_miss() -> None:
     assert result["value"] == 7
     assert result.results["value"].state is TaskState.SUCCESS
     assert len(cache) == 1  # writes still work
+
+
+def test_context_injection_reports_attempt_and_run_id() -> None:
+    wf = Workflow("ctx")
+    seen: list[Context] = []
+
+    @wf.task(retries=2)
+    def flaky(c: Context, seed: int = 1) -> int:
+        seen.append(c)
+        if c.attempt < 3:
+            raise RuntimeError("boom")
+        return seed
+
+    @wf.task
+    def after(flaky: int, info: Context) -> str:
+        return f"{info.task}:{info.run_id}"
+
+    result = wf.run(params={"seed": 5})
+    assert result["flaky"] == 5
+    assert [c.attempt for c in seen] == [1, 2, 3]
+    assert seen[0].max_attempts == 3
+    assert not seen[0].is_retry
+    assert seen[1].is_retry
+    assert result["after"] == f"after:{seen[0].run_id}"
+    assert wf["flaky"].inputs == ("seed",)
+    assert wf.required_params() == {}
+
+
+def test_context_param_is_not_a_cache_input() -> None:
+    wf = Workflow("ctx-cache")
+    calls: list[str] = []
+
+    @wf.task(cache=True)
+    def work(ctx: Context) -> int:
+        calls.append(ctx.run_id)
+        return 1
+
+    cache = MemoryCache()
+    wf.run(cache=cache)
+    wf.run(cache=cache)
+    assert len(calls) == 1
+
+
+def test_two_context_params_rejected() -> None:
+    def bad(a: Context, b: Context) -> None: ...
+
+    with pytest.raises(TypeError, match="several Context"):
+        task(bad)
