@@ -178,3 +178,29 @@ def test_run_dry_run_reports_missing_params(
     assert main(["run", str(path), "--dry-run"]) == 2
     assert "region" in capsys.readouterr().err
     assert main(["run", str(path), "--dry-run", "-p", "region=EU"]) == 0
+
+
+def test_run_events_written_as_json_lines(wf_file: Path, tmp_path: Path) -> None:
+    out = tmp_path / "events.jsonl"
+    assert main(["run", str(wf_file), "-q", "--events", str(out)]) == 0
+    events = [json.loads(line) for line in out.read_text().splitlines()]
+    assert events[0]["type"] == "run_started"
+    assert events[-1]["type"] == "run_finished"
+    assert {e["task"] for e in events if e["type"] == "task_succeeded"} == {
+        "numbers",
+        "total",
+        "broken",
+    }
+
+
+def test_run_events_to_stdout(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", str(wf_file), "-q", "--events", "-"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert all(json.loads(line)["type"] for line in lines)
+
+
+def test_run_events_stdout_conflicts_with_json(
+    wf_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["run", str(wf_file), "--events", "-", "--json"]) == 2
+    assert "stdout" in capsys.readouterr().err
