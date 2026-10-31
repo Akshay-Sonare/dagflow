@@ -16,6 +16,8 @@ from dagflow import (
     Workflow,
     task,
 )
+from dagflow.executor import Executor
+from dagflow.task import Task
 
 
 def test_independent_tasks_run_concurrently() -> None:
@@ -363,3 +365,46 @@ def test_two_context_params_rejected() -> None:
 
     with pytest.raises(TypeError, match="several Context"):
         task(bad)
+
+
+def _pool_workflow(pool: str | None) -> tuple[Workflow, dict[str, int]]:
+    state = {"now": 0, "peak": 0}
+    wf = Workflow("pooled")
+
+    def make(i: int) -> None:
+        async def fn() -> int:
+            state["now"] += 1
+            state["peak"] = max(state["peak"], state["now"])
+            await asyncio.sleep(0.01)
+            state["now"] -= 1
+            return i
+
+        wf.add(Task(fn=fn, name=f"t{i}", pool=pool))
+
+    for i in range(6):
+        make(i)
+    return wf, state
+
+
+def test_pool_limits_concurrency() -> None:
+    wf, state = _pool_workflow("api")
+    result = wf.run(max_concurrency=6, pools={"api": 2})
+    assert result.ok
+    assert state["peak"] == 2
+
+
+def test_pool_unlimited_without_pool() -> None:
+    wf, state = _pool_workflow(None)
+    assert wf.run(max_concurrency=6, pools={"api": 2}).ok
+    assert state["peak"] == 6
+
+
+def test_pool_without_limit_is_an_error() -> None:
+    wf, _ = _pool_workflow("api")
+    with pytest.raises(ValueError, match="pool 'api'"):
+        wf.run()
+
+
+def test_pool_limit_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="limit"):
+        Executor(pools={"api": 0})

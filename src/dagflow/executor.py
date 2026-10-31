@@ -9,6 +9,7 @@ back-off sleeps happen outside it so waiting tasks don't hog a slot.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import uuid
@@ -100,6 +101,8 @@ class Executor:
         cache: Backend for tasks declared with ``cache=True``.
         fail_fast: Cancel everything still running as soon as one task fails.
             Otherwise only the failed task's descendants are skipped.
+        pools: Concurrency limits for named task pools (``@task(pool=...)``), applied on top
+            of ``max_concurrency``. A task naming a pool that has no limit is an error.
         bus: Where lifecycle events are published.
     """
 
@@ -109,6 +112,7 @@ class Executor:
         max_concurrency: int = 8,
         cache: Cache | None = None,
         fail_fast: bool = False,
+        pools: Mapping[str, int] | None = None,
         bus: EventBus | None = None,
     ) -> None:
         if max_concurrency < 1:
@@ -116,6 +120,10 @@ class Executor:
         self.max_concurrency = max_concurrency
         self.cache = cache
         self.fail_fast = fail_fast
+        self.pools = dict(pools or {})
+        for pool, limit in self.pools.items():
+            if limit < 1:
+                raise ValueError(f"pool {pool!r} limit must be >= 1")
         self.bus = bus or EventBus()
 
     async def execute(
@@ -130,12 +138,18 @@ class Executor:
         order = dag.topological_order()  # also rejects cycles before anything runs
         run = RunResult(workflow, {name: TaskResult(name) for name in order})
         waiting_on = {name: len(dag.upstream(name)) for name in order}
+        for t in (tasks[n] for n in order):
+            if t.pool is not None and t.pool not in self.pools:
+                raise ValueError(f"task {t.name!r} uses pool {t.pool!r} but the run sets no limit")
         semaphore = asyncio.Semaphore(self.max_concurrency)
+        pool_gates = {n: asyncio.Semaphore(limit) for n, limit in self.pools.items()}
         running: dict[asyncio.Task[TaskResult], str] = {}
 
         def launch(name: str) -> None:
             inputs = self._inputs(tasks[name], run.results, params)
-            coro = self._run_task(tasks[name], inputs, semaphore, run_id)
+            coro = self._run_task(
+                tasks[name], inputs, semaphore, run_id, pool_gates.get(tasks[name].pool or "")
+            )
             running[asyncio.create_task(coro, name=f"dagflow:{name}")] = name
 
         self.bus.emit(Event(EventType.RUN_STARTED, detail=workflow))
@@ -215,7 +229,12 @@ class Executor:
                 self._skip([name], results, cause="fail-fast")
 
     async def _run_task(
-        self, task: Task, inputs: dict[str, Any], semaphore: asyncio.Semaphore, run_id: str
+        self,
+        task: Task,
+        inputs: dict[str, Any],
+        semaphore: asyncio.Semaphore,
+        run_id: str,
+        gate: asyncio.Semaphore | None = None,
     ) -> TaskResult:
         result = TaskResult(task.name)
         started = time.perf_counter()
@@ -242,7 +261,8 @@ class Executor:
                 if task.context_param is not None:
                     ctx = Context(run_id, task.name, result.attempts, task.retry.max_attempts)
                     call_inputs = {**inputs, task.context_param: ctx}
-                async with semaphore:
+                # Pool first, so a task waiting on a full pool doesn't hold a global slot.
+                async with gate or contextlib.nullcontext(), semaphore:
                     value = await self._invoke(task, call_inputs)
             except Exception as exc:
                 if task.retry.should_retry(exc, result.attempts):
