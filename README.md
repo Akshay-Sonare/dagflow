@@ -46,6 +46,7 @@ print(result["revenue"])
 | **Event-driven scheduler** | A task starts the instant its last dependency finishes, not when a whole "layer" is done. Bounded by a concurrency semaphore. |
 | **Sync + async** | `async def` tasks are awaited; blocking functions are moved to threads automatically. |
 | **Retries** | Exponential back-off with a cap and exception filtering. Back-off sleeps don't hold a concurrency slot. |
+| **Pools** | `@task(pool="api")` plus `wf.run(pools={"api": 2})` caps how many tasks of a pool run at once, on top of `max_concurrency`. |
 | **Timeouts** | Per-attempt, distinguishing a real timeout from a `TimeoutError` the task raised itself. |
 | **Failure handling** | Failed tasks skip only their descendants; independent branches keep going. `fail_fast=True` cancels everything instead. |
 | **Caching** | Content-addressed keys over the task's *bytecode* and canonicalised inputs, so editing a task invalidates its cache. In-memory (optional `ttl` and LRU `max_size`) and SQLite (optional `ttl`) backends, or bring your own via a `Protocol`. |

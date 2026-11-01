@@ -84,6 +84,7 @@ class Task:
     timeout: float | None = None
     cache: bool = False
     tags: frozenset[str] = frozenset()
+    pool: str | None = None
     signature: inspect.Signature = field(init=False, repr=False)
     context_param: str | None = field(init=False, default=None)
 
@@ -152,6 +153,7 @@ def task(
     cache: bool = False,
     after: Iterable[str | Task] = (),
     tags: Iterable[str] = (),
+    pool: str | None = None,
 ) -> Callable[[TaskFn], Task]: ...
 
 
@@ -168,6 +170,7 @@ def task(
     cache: bool = False,
     after: Iterable[str | Task] = (),
     tags: Iterable[str] = (),
+    pool: str | None = None,
 ) -> Task | Callable[[TaskFn], Task]:
     """Turn a function into a :class:`Task`. Usable bare (``@task``) or with options.
 
@@ -181,6 +184,8 @@ def task(
         cache: Reuse results for identical inputs when the run has a cache.
         after: Tasks that must finish first even though no data flows from them.
         tags: Free-form labels, used for filtering and display.
+        pool: Named concurrency pool; the run's ``pools={name: limit}`` caps how many tasks
+            of that pool run at once (e.g. a rate-limited API).
     """
 
     def wrap(func: TaskFn) -> Task:
@@ -197,6 +202,7 @@ def task(
             timeout=timeout,
             cache=cache,
             tags=frozenset(tags),
+            pool=pool,
         )
 
     return wrap(fn) if fn is not None else wrap
