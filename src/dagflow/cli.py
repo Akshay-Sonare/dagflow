@@ -15,9 +15,15 @@ from typing import Any, ClassVar, TextIO
 from dagflow import __version__
 from dagflow.cache import SQLiteCache
 from dagflow.errors import DagflowError
-from dagflow.events import Event, EventType
+from dagflow.events import Event, EventType, Listener
 from dagflow.executor import RunResult, TaskState
-from dagflow.server import Dashboard, DashboardServer, coerce_param, is_loopback
+from dagflow.server import (
+    Dashboard,
+    DashboardServer,
+    coerce_param,
+    event_to_dict,
+    is_loopback,
+)
 from dagflow.workflow import Workflow
 
 
@@ -106,6 +112,17 @@ class ConsoleReporter:
         self.stream.flush()
 
 
+class JsonLinesReporter:
+    """Event listener that writes one JSON object per event (JSON Lines)."""
+
+    def __init__(self, stream: TextIO) -> None:
+        self.stream = stream
+
+    def __call__(self, event: Event) -> None:
+        self.stream.write(json.dumps(event_to_dict(event)) + "\n")
+        self.stream.flush()
+
+
 def format_summary(result: RunResult) -> str:
     width = max((len(name) for name in result.results), default=4)
     lines = [f"{'task':<{width}}  {'state':<9}  {'tries':>5}  {'time':>7}"]
@@ -122,7 +139,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
     wf = load_workflow(args.workflow)
     if args.dry_run:
         return _dry_run(wf, args)
-    listeners = [] if args.quiet else [ConsoleReporter()]
+    if args.events == "-" and args.json:
+        raise DagflowError("--events - and --json both write to stdout; send events to a file")
+    listeners: list[Listener] = [] if args.quiet else [ConsoleReporter()]
+    events_file = None
+    if args.events == "-":
+        listeners.append(JsonLinesReporter(sys.stdout))
+    elif args.events:
+        events_file = open(args.events, "w", encoding="utf-8")  # noqa: SIM115
+        listeners.append(JsonLinesReporter(events_file))
     cache = SQLiteCache(args.cache) if args.cache else None
     try:
         result = wf.run(
@@ -137,6 +162,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     finally:
         if cache is not None:
             cache.close()
+        if events_file is not None:
+            events_file.close()
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, default=repr))
     else:
@@ -230,6 +257,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--json", action="store_true", help="print results as JSON on stdout")
     run.add_argument(
         "--dry-run", action="store_true", help="validate params and print the plan; run nothing"
+    )
+    run.add_argument(
+        "--events",
+        metavar="PATH",
+        help="write run events as JSON lines to PATH ('-' for stdout)",
     )
     run.add_argument("-q", "--quiet", action="store_true", help="no live progress output")
     run.set_defaults(handler=_cmd_run)
