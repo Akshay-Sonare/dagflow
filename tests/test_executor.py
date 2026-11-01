@@ -367,6 +367,47 @@ def test_two_context_params_rejected() -> None:
         task(bad)
 
 
+def test_critical_path_follows_slowest_chain() -> None:
+    wf = Workflow()
+
+    @wf.task
+    async def root() -> int:
+        return 1
+
+    @wf.task
+    async def slow(root: int) -> int:
+        await asyncio.sleep(0.15)
+        return root
+
+    @wf.task
+    async def quick(root: int) -> int:
+        return root
+
+    @wf.task
+    async def final(slow: int, quick: int) -> int:
+        return slow + quick
+
+    result = wf.run()
+    assert result.critical_path() == ["root", "slow", "final"]
+    assert result.to_dict()["critical_path"] == ["root", "slow", "final"]
+
+
+def test_critical_path_ignores_tasks_that_never_ran() -> None:
+    wf = Workflow()
+
+    @wf.task
+    def boom() -> int:
+        raise RuntimeError("nope")
+
+    @wf.task
+    def after(boom: int) -> int:
+        return boom
+
+    result = wf.run()
+    assert result.results["after"].state is TaskState.SKIPPED
+    assert result.critical_path() == ["boom"]
+
+
 def _pool_workflow(pool: str | None) -> tuple[Workflow, dict[str, int]]:
     state = {"now": 0, "peak": 0}
     wf = Workflow("pooled")
