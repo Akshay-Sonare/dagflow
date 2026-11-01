@@ -178,3 +178,10 @@ def test_run_dry_run_reports_missing_params(
     assert main(["run", str(path), "--dry-run"]) == 2
     assert "region" in capsys.readouterr().err
     assert main(["run", str(path), "--dry-run", "-p", "region=EU"]) == 0
+
+
+def test_summary_reports_critical_path(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", str(wf_file), "--json", "-q"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["critical_path"]
+    assert all(name in out["tasks"] for name in out["critical_path"])

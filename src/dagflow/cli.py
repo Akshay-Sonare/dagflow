@@ -115,6 +115,9 @@ def format_summary(result: RunResult) -> str:
     tally = ", ".join(f"{n} {state}" for state, n in counts.items() if n)
     verdict = "succeeded" if result.ok else "FAILED"
     lines.append(f"\nworkflow {result.workflow!r} {verdict} in {result.duration:.2f}s ({tally})")
+    path = result.critical_path()
+    if len(path) > 1:
+        lines.append("critical path: " + " -> ".join(path))
     return "\n".join(lines)
 
 

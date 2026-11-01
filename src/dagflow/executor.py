@@ -47,6 +47,7 @@ class TaskResult:
     error: BaseException | None = None
     attempts: int = 0
     duration: float = 0.0
+    upstream: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -73,12 +74,38 @@ class RunResult:
     def by_state(self, state: TaskState) -> list[str]:
         return [name for name, r in self.results.items() if r.state is state]
 
+    def critical_path(self) -> list[str]:
+        """The dependency chain of executed tasks with the largest total duration.
+
+        Speeding up a task on this path is what shortens the run. Skipped and
+        cancelled tasks never ran, so they are ignored; empty if nothing ran.
+        """
+        best: dict[str, tuple[float, list[str]]] = {}
+
+        def visit(name: str) -> tuple[float, list[str]]:
+            if name not in best:
+                r = self.results[name]
+                if r.state in (TaskState.SKIPPED, TaskState.CANCELLED, TaskState.PENDING):
+                    best[name] = (0.0, [])
+                else:
+                    total, path = max(
+                        (visit(u) for u in r.upstream if u in self.results),
+                        key=lambda item: item[0],
+                        default=(0.0, []),
+                    )
+                    best[name] = (total + r.duration, [*path, name])
+            return best[name]
+
+        ranked = [visit(name) for name in self.results]
+        return max(ranked, key=lambda item: item[0], default=(0.0, []))[1]
+
     def to_dict(self) -> dict[str, Any]:
         """JSON-friendly summary (values are left as-is; serialise with ``default=repr``)."""
         return {
             "workflow": self.workflow,
             "ok": self.ok,
             "duration": round(self.duration, 4),
+            "critical_path": self.critical_path(),
             "tasks": {
                 name: {
                     "state": str(r.state),
@@ -149,6 +176,7 @@ class Executor:
                 for finished in done:
                     name = running.pop(finished)
                     result = run.results[name] = finished.result()
+                    result.upstream = tuple(sorted(dag.upstream(name)))
                     if result.state.ok:
                         for child in sorted(dag.downstream(name)):
                             waiting_on[child] -= 1
