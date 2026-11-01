@@ -79,6 +79,7 @@ class Workflow:
         cache: bool = False,
         after: Iterable[str | Task] = (),
         tags: Iterable[str] = (),
+        pool: str | None = None,
     ) -> Callable[[TaskFn], Task]: ...
 
     def task(
@@ -95,6 +96,7 @@ class Workflow:
         cache: bool = False,
         after: Iterable[str | Task] = (),
         tags: Iterable[str] = (),
+        pool: str | None = None,
     ) -> Task | Callable[[TaskFn], Task]:
         """Decorator form of :func:`dagflow.task` that also registers the task."""
 
@@ -109,6 +111,7 @@ class Workflow:
                 cache=cache,
                 after=after,
                 tags=tags,
+                pool=pool,
             )(func)
             self.add(created)
             return created
@@ -204,6 +207,7 @@ class Workflow:
         max_concurrency: int = 8,
         cache: Cache | None = None,
         fail_fast: bool = False,
+        pools: Mapping[str, int] | None = None,
         listeners: Iterable[Listener] = (),
     ) -> RunResult:
         """Run the workflow on the current event loop. See :meth:`run`."""
@@ -213,7 +217,11 @@ class Workflow:
         for listener in listeners:
             bus.subscribe(listener)
         executor = Executor(
-            max_concurrency=max_concurrency, cache=cache, fail_fast=fail_fast, bus=bus
+            max_concurrency=max_concurrency,
+            cache=cache,
+            fail_fast=fail_fast,
+            pools=pools,
+            bus=bus,
         )
         return await executor.execute(self.name, self._tasks, graph, params)
 
@@ -226,6 +234,7 @@ class Workflow:
         max_concurrency: int = 8,
         cache: Cache | None = None,
         fail_fast: bool = False,
+        pools: Mapping[str, int] | None = None,
         listeners: Iterable[Listener] = (),
     ) -> RunResult:
         """Validate and run the workflow, blocking until every task has settled.
@@ -237,6 +246,7 @@ class Workflow:
             max_concurrency: Maximum task attempts in flight at once.
             cache: Backend for tasks declared with ``cache=True``.
             fail_fast: Cancel running tasks as soon as any task fails.
+            pools: Limits for named task pools, e.g. ``{"api": 2}`` (see ``@task(pool=...)``).
             listeners: Callables that receive every :class:`~dagflow.events.Event`.
         """
         return asyncio.run(
@@ -247,6 +257,7 @@ class Workflow:
                 max_concurrency=max_concurrency,
                 cache=cache,
                 fail_fast=fail_fast,
+                pools=pools,
                 listeners=listeners,
             )
         )
