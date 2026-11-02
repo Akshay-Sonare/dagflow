@@ -77,3 +77,15 @@ class TaskFailedError(DagflowError):
         self.task = task
         self.state = state
         self.__cause__ = cause
+
+
+class Skip(DagflowError):
+    """Raise from a task to skip it on purpose (e.g. nothing to do for these params).
+
+    The task ends ``SKIPPED`` without retries, its descendants are skipped too, and the
+    run still counts as successful as long as nothing failed.
+    """
+
+    def __init__(self, reason: str = "") -> None:
+        super().__init__(reason or "skipped")
+        self.reason = reason

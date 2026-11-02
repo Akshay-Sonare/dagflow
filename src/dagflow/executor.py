@@ -19,7 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from dagflow.cache import MISSING, Cache, cache_key
-from dagflow.errors import TaskFailedError, TaskTimeoutError
+from dagflow.errors import Skip, TaskFailedError, TaskTimeoutError
 from dagflow.events import Event, EventBus, EventType
 from dagflow.graph import DAG
 from dagflow.task import Context, Task
@@ -61,7 +61,10 @@ class RunResult:
 
     @property
     def ok(self) -> bool:
-        return all(r.state.ok for r in self.results.values())
+        """True unless a task failed or was cancelled (deliberate ``Skip`` is fine)."""
+        return not any(
+            r.state in (TaskState.FAILED, TaskState.CANCELLED) for r in self.results.values()
+        )
 
     def __getitem__(self, name: str) -> Any:
         result = self.results[name]
@@ -292,6 +295,13 @@ class Executor:
                 # Pool first, so a task waiting on a full pool doesn't hold a global slot.
                 async with gate or contextlib.nullcontext(), semaphore:
                     value = await self._invoke(task, call_inputs)
+            except Skip as skip:
+                result.state = TaskState.SKIPPED
+                result.duration = time.perf_counter() - started
+                self.bus.emit(
+                    Event(EventType.TASK_SKIPPED, task.name, detail=skip.reason or "skipped")
+                )
+                return result
             except Exception as exc:
                 if task.retry.should_retry(exc, result.attempts):
                     delay = task.retry.delay(result.attempts)
