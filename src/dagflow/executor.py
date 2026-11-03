@@ -49,6 +49,8 @@ class TaskResult:
     attempts: int = 0
     duration: float = 0.0
     upstream: tuple[str, ...] = ()
+    cache_lookup: bool = False
+    """True if a cache lookup was made for this task (it is cached and its inputs hash)."""
 
 
 @dataclass(slots=True)
@@ -103,6 +105,20 @@ class RunResult:
         ranked = [visit(name) for name in self.results]
         return max(ranked, key=lambda item: item[0], default=(0.0, []))[1]
 
+    def cache_stats(self) -> dict[str, Any]:
+        """Cache ``hits``, ``misses`` and ``hit_rate`` (``None`` if no lookups happened).
+
+        Only tasks that consulted the cache count; tasks skipped or cancelled before
+        running never looked, and uncacheable inputs bypass the cache entirely.
+        """
+        lookups = [r for r in self.results.values() if r.cache_lookup]
+        hits = sum(r.state is TaskState.CACHED for r in lookups)
+        return {
+            "hits": hits,
+            "misses": len(lookups) - hits,
+            "hit_rate": round(hits / len(lookups), 4) if lookups else None,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         """JSON-friendly summary (values are left as-is; serialise with ``default=repr``)."""
         return {
@@ -110,6 +126,7 @@ class RunResult:
             "ok": self.ok,
             "duration": round(self.duration, 4),
             "critical_path": self.critical_path(),
+            "cache": self.cache_stats(),
             "tasks": {
                 name: {
                     "state": str(r.state),
@@ -273,6 +290,7 @@ class Executor:
         key = cache_key(task, inputs) if cache is not None else None
 
         if cache is not None and key is not None:
+            result.cache_lookup = True
             try:
                 hit = await asyncio.to_thread(cache.get, key)
             except Exception:
