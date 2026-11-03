@@ -10,6 +10,7 @@ from dagflow import (
     Event,
     EventType,
     MemoryCache,
+    Skip,
     TaskFailedError,
     TaskState,
     TaskTimeoutError,
@@ -449,3 +450,46 @@ def test_pool_without_limit_is_an_error() -> None:
 def test_pool_limit_must_be_positive() -> None:
     with pytest.raises(ValueError, match="limit"):
         Executor(pools={"api": 0})
+
+
+def test_skip_exception_skips_task_and_descendants_without_failing_run() -> None:
+    wf = Workflow()
+    calls: list[str] = []
+
+    @wf.task(retries=3)
+    def maybe() -> int:
+        calls.append("maybe")
+        raise Skip("nothing to do")
+
+    @wf.task
+    def after(maybe: int) -> int:
+        return maybe
+
+    @wf.task
+    def other() -> int:
+        return 1
+
+    events: list[Event] = []
+    result = wf.run(listeners=[events.append])
+    assert calls == ["maybe"]  # no retries
+    assert result.results["maybe"].state is TaskState.SKIPPED
+    assert result.results["after"].state is TaskState.SKIPPED
+    assert result["other"] == 1
+    assert result.ok
+    assert any(e.type is EventType.TASK_SKIPPED and e.detail == "nothing to do" for e in events)
+    with pytest.raises(TaskFailedError):
+        result["maybe"]
+
+
+def test_skip_does_not_hide_real_failures() -> None:
+    wf = Workflow()
+
+    @wf.task
+    def a() -> None:
+        raise Skip
+
+    @wf.task
+    def b() -> None:
+        raise RuntimeError("boom")
+
+    assert not wf.run().ok
