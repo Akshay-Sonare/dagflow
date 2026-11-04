@@ -493,3 +493,32 @@ def test_skip_does_not_hide_real_failures() -> None:
         raise RuntimeError("boom")
 
     assert not wf.run().ok
+
+
+def test_cache_stats_count_hits_and_misses() -> None:
+    wf = Workflow()
+
+    @wf.task(cache=True)
+    def square(n: int) -> int:
+        return n * n
+
+    @wf.task
+    def plain(square: int) -> int:
+        return square + 1
+
+    cache = MemoryCache()
+    first = wf.run({"n": 3}, cache=cache)
+    assert first.cache_stats() == {"hits": 0, "misses": 1, "hit_rate": 0.0}
+    second = wf.run({"n": 3}, cache=cache)
+    assert second.cache_stats() == {"hits": 1, "misses": 0, "hit_rate": 1.0}
+    assert second.to_dict()["cache"]["hit_rate"] == 1.0
+
+
+def test_cache_stats_without_cache_has_no_hit_rate() -> None:
+    wf = Workflow()
+
+    @wf.task(cache=True)
+    def one() -> int:
+        return 1
+
+    assert wf.run().cache_stats() == {"hits": 0, "misses": 0, "hit_rate": None}

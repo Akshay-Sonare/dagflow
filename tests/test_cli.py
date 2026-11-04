@@ -211,3 +211,16 @@ def test_run_events_stdout_conflicts_with_json(
 ) -> None:
     assert main(["run", str(wf_file), "--events", "-", "--json"]) == 2
     assert "stdout" in capsys.readouterr().err
+
+
+def test_summary_reports_cache_hit_rate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "c.py"
+    path.write_text(
+        "from dagflow import Workflow\nworkflow = Workflow('c')\n"
+        "@workflow.task(cache=True)\ndef a(): return 1\n"
+    )
+    cache = str(tmp_path / "cache.db")
+    assert main(["run", str(path), "-q", "--cache", cache]) == 0
+    assert "cache: 0 hit, 1 miss (0%)" in capsys.readouterr().err
+    assert main(["run", str(path), "-q", "--cache", cache]) == 0
+    assert "cache: 1 hit, 0 miss (100%)" in capsys.readouterr().err

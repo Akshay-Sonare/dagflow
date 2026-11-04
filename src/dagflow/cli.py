@@ -132,6 +132,10 @@ def format_summary(result: RunResult) -> str:
     tally = ", ".join(f"{n} {state}" for state, n in counts.items() if n)
     verdict = "succeeded" if result.ok else "FAILED"
     lines.append(f"\nworkflow {result.workflow!r} {verdict} in {result.duration:.2f}s ({tally})")
+    stats = result.cache_stats()
+    if stats["hit_rate"] is not None:
+        rate = f"{stats['hit_rate']:.0%}"
+        lines.append(f"cache: {stats['hits']} hit, {stats['misses']} miss ({rate})")
     path = result.critical_path()
     if len(path) > 1:
         lines.append("critical path: " + " -> ".join(path))

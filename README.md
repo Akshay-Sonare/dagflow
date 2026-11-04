@@ -101,7 +101,8 @@ dagflow graph examples/sales_report.py              # Mermaid diagram
 dagflow graph examples/sales_report.py -f dot | dot -Tpng > graph.png
 dagflow run   examples/sales_report.py -t revenue_by_customer --json
 dagflow run   examples/sales_report.py --dry-run -p region=EU  # validate params + show stages, run nothing
-# the run summary (and --json) also reports the critical path: the slowest dependency chain
+# the run summary (and --json) also reports the critical path (the slowest dependency chain)
+# and, when --cache is used, the cache hit rate
 dagflow run   pipeline.py --events events.jsonl     # stream lifecycle events as JSON lines ('-' = stdout)
 dagflow run   pipeline.py -T nightly                # every task tagged "nightly" + its deps
 ```
