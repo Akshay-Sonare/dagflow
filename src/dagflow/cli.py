@@ -164,6 +164,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             max_concurrency=args.jobs,
             cache=cache,
             fail_fast=args.fail_fast,
+            timeout=args.timeout,
             listeners=listeners,
         )
     finally:
@@ -261,6 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("-j", "--jobs", type=int, default=8, help="max concurrent tasks")
     run.add_argument("--cache", metavar="PATH", help="SQLite file for cached task results")
     run.add_argument("--fail-fast", action="store_true", help="cancel everything on failure")
+    run.add_argument(
+        "--timeout", type=float, metavar="SECONDS", help="cancel the whole run after this long"
+    )
     run.add_argument("--json", action="store_true", help="print results as JSON on stdout")
     run.add_argument(
         "--dry-run", action="store_true", help="validate params and print the plan; run nothing"

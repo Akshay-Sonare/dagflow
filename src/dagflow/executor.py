@@ -148,6 +148,8 @@ class Executor:
         cache: Backend for tasks declared with ``cache=True``.
         fail_fast: Cancel everything still running as soon as one task fails.
             Otherwise only the failed task's descendants are skipped.
+        timeout: Wall-clock limit in seconds for the whole run. When it expires, running
+            tasks are cancelled and unstarted ones skipped, so the run is not ``ok``.
         pools: Concurrency limits for named task pools (``@task(pool=...)``), applied on top
             of ``max_concurrency``. A task naming a pool that has no limit is an error.
         bus: Where lifecycle events are published.
@@ -160,10 +162,14 @@ class Executor:
         cache: Cache | None = None,
         fail_fast: bool = False,
         pools: Mapping[str, int] | None = None,
+        timeout: float | None = None,
         bus: EventBus | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be >= 1")
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be > 0")
+        self.timeout = timeout
         self.max_concurrency = max_concurrency
         self.cache = cache
         self.fail_fast = fail_fast
@@ -181,6 +187,7 @@ class Executor:
         params: Mapping[str, Any],
     ) -> RunResult:
         started = time.perf_counter()
+        deadline = None if self.timeout is None else started + self.timeout
         run_id = uuid.uuid4().hex[:12]
         order = dag.topological_order()  # also rejects cycles before anything runs
         run = RunResult(workflow, {name: TaskResult(name) for name in order})
@@ -206,7 +213,13 @@ class Executor:
 
         try:
             while running:
-                done, _ = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+                remaining = None if deadline is None else max(0.0, deadline - time.perf_counter())
+                done, _ = await asyncio.wait(
+                    running, timeout=remaining, return_when=asyncio.FIRST_COMPLETED
+                )
+                if not done:
+                    await self._cancel(running, run.results, dag, reason="run timeout")
+                    break
                 for finished in done:
                     name = running.pop(finished)
                     result = run.results[name] = finished.result()
@@ -264,17 +277,18 @@ class Executor:
         running: dict[asyncio.Task[TaskResult], str],
         results: dict[str, TaskResult],
         dag: DAG,
+        reason: str = "fail-fast",
     ) -> None:
         for pending in running:
             pending.cancel()
         await asyncio.gather(*running, return_exceptions=True)
         for name in sorted(running.values()):
             results[name].state = TaskState.CANCELLED
-            self.bus.emit(Event(EventType.TASK_CANCELLED, name, detail="fail-fast"))
+            self.bus.emit(Event(EventType.TASK_CANCELLED, name, detail=reason))
         running.clear()
         for name in list(results):
             if results[name].state is TaskState.PENDING:
-                self._skip([name], results, cause="fail-fast")
+                self._skip([name], results, cause=reason)
 
     async def _run_task(
         self,
