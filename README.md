@@ -124,6 +124,7 @@ Opens a local dashboard (http://127.0.0.1:8765) where you can:
   you can see exactly what overlapped.
 - **Inspect tasks**: click any task for its docstring, settings, attempts, errors and the
   actual value it returned.
+- **Cancel it**: a running run can be stopped from the page (or `POST /api/runs/<id>/cancel`).
 - **Browse history**: recent runs are kept in memory; click one to replay it.
 
 It is built with the standard library only (`http.server` plus a single HTML page with no
@@ -138,6 +139,7 @@ The JSON API behind it is usable on its own:
 | `POST` | `/api/runs` | start a run: `{"params": {...}, "tags": [...], "targets": [...]}` |
 | `GET` | `/api/runs` | recent runs, newest first |
 | `GET` | `/api/runs/<id>` | one run with all its events and results |
+| `POST` | `/api/runs/<id>/cancel` | stop a running run (`409` if it already finished) |
 | `GET` | `/api/runs/<id>/events` | live `text/event-stream` of events |
 
 The example's graph, as produced by `dagflow graph`:

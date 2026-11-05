@@ -11,6 +11,7 @@ API:
     GET  /api/runs               recent runs, newest first
     POST /api/runs               start a run: {"params": {}, "targets": [], "tags": []}
     GET  /api/runs/<id>          one run with its events and final result
+    POST /api/runs/<id>/cancel   stop a running run (409 if it already finished)
     GET  /api/runs/<id>/events   live event stream (text/event-stream); each event
                                  carries ``id: <n>`` and ``Last-Event-ID`` resumes
 
@@ -32,7 +33,7 @@ import socketserver
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +44,7 @@ from urllib.parse import urlsplit
 from dagflow.cache import Cache
 from dagflow.errors import DagflowError
 from dagflow.events import Event
+from dagflow.executor import RunResult
 from dagflow.workflow import Workflow
 
 _KEEPALIVE_SECONDS = 15.0
@@ -146,10 +148,31 @@ class RunRecord:
     result: dict[str, Any] | None = None
     error: str | None = None
     _cond: threading.Condition = field(default_factory=threading.Condition, repr=False)
+    _cancel: Callable[[], object] | None = field(default=None, repr=False)
+    _cancel_requested: bool = field(default=False, repr=False)
 
     @property
     def done(self) -> bool:
         return self.status != "running"
+
+    def attach(self, cancel: Callable[[], object]) -> None:
+        """Register how to stop the run; fires at once if a cancel already came in."""
+        with self._cond:
+            self._cancel = cancel
+            requested = self._cancel_requested
+        if requested:
+            cancel()
+
+    def request_cancel(self) -> bool:
+        """Ask a running run to stop. False if it had already finished."""
+        with self._cond:
+            if self.done:
+                return False
+            self._cancel_requested = True
+            cancel = self._cancel
+        if cancel is not None:
+            cancel()
+        return True
 
     def add_event(self, event: Event) -> None:
         with self._cond:
@@ -254,22 +277,30 @@ class Dashboard:
 
     def _execute(self, record: RunRecord) -> None:
         try:
-            result = asyncio.run(
-                self.workflow.arun(
-                    record.params,
-                    targets=record.targets or None,
-                    tags=record.tags or None,
-                    max_concurrency=self.max_concurrency,
-                    cache=self.cache,
-                    listeners=[record.add_event],
-                )
-            )
+            result = asyncio.run(self._run(record))
+        except asyncio.CancelledError:
+            record.finish("cancelled", None, "cancelled by user")
+            return
         except BaseException as exc:
             # BaseException too: a task calling sys.exit() must not leave the run
             # "running" forever. The worker thread ends here either way.
             record.finish("error", None, f"{type(exc).__name__}: {exc}")
             return
         record.finish("succeeded" if result.ok else "failed", _json_safe(result.to_dict()))
+
+    async def _run(self, record: RunRecord) -> RunResult:
+        loop, current = asyncio.get_running_loop(), asyncio.current_task()
+        assert current is not None
+        # Cancelling the run's own task makes the executor cancel every running task.
+        record.attach(lambda: loop.call_soon_threadsafe(current.cancel))
+        return await self.workflow.arun(
+            record.params,
+            targets=record.targets or None,
+            tags=record.tags or None,
+            max_concurrency=self.max_concurrency,
+            cache=self.cache,
+            listeners=[record.add_event],
+        )
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -359,7 +390,15 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self._read_body()
         if raw is None or not self._host_allowed() or not self._origin_allowed():
             return
-        if self.path.rstrip("/") != "/api/runs":
+        parts = self.path.split("?", 1)[0].strip("/").split("/")
+        if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "cancel":
+            if record := self._run_from_path(parts[2]):
+                if record.request_cancel():
+                    self._json(record.summary(), HTTPStatus.ACCEPTED)
+                else:
+                    self._error(HTTPStatus.CONFLICT, f"run {record.id} already finished")
+            return
+        if parts != ["api", "runs"]:
             self._error(HTTPStatus.NOT_FOUND, f"no route for {self.path}")
             return
         # Only "simple" content types can be sent cross-site without a CORS

@@ -37,7 +37,7 @@
     font-size: 12px; font-weight: 600; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
   .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
   .pill.running { color: var(--running); } .pill.succeeded { color: var(--success); }
-  .pill.failed, .pill.error { color: var(--failed); }
+  .pill.failed, .pill.error { color: var(--failed); } .pill.cancelled { color: var(--cancelled); }
   .pill.running::before { animation: pulse 1s ease-in-out infinite; }
   .elapsed { font-family: var(--mono); color: var(--muted); font-size: 13px; min-width: 56px; text-align: right; }
 
@@ -62,6 +62,7 @@
   .run-btn { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink);
     font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
   .run-btn:disabled { opacity: .55; cursor: progress; }
+  .cancel-btn { margin-top: 8px; background: transparent; color: var(--failed); border: 1px solid var(--failed); }
   .run-btn kbd { font-family: var(--mono); font-size: 11px; opacity: .75; }
   .form-error { color: var(--failed); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
   .muted { color: var(--muted); } .empty { color: var(--faint); font-size: 13px; padding: 4px 0; }
@@ -72,6 +73,7 @@
   .history li button:hover { background: var(--panel-2); }
   .history li button[aria-current="true"] { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--accent); }
   .history .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pending); }
+  .history .dot.cancelled { background: var(--cancelled); }
   .history .dot.running { background: var(--running); animation: pulse 1s infinite; }
   .history .dot.succeeded { background: var(--success); } .history .dot.failed, .history .dot.error { background: var(--failed); }
   .history .meta { font-size: 12px; color: var(--faint); font-family: var(--mono); }
@@ -172,6 +174,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>
           Run workflow <kbd>⌘↵</kbd>
         </button>
+        <button class="run-btn cancel-btn" id="cancel-btn" type="button" hidden>Cancel run</button>
         <div class="form-error" id="form-error" role="alert"></div>
       </form>
     </section>
@@ -434,6 +437,7 @@ function paintStatus() {
   pill.textContent = status;
   $("elapsed").textContent = S.t0 ? fmt((S.tEnd ?? Date.now() / 1000) - S.t0) : "";
   $("run-btn").disabled = status === "running";
+  $("cancel-btn").hidden = status !== "running";
 }
 
 function paint() { paintGraph(); paintTimeline(); paintDetails(); paintStatus(); }
@@ -538,6 +542,11 @@ function finish(run) {
 setInterval(() => { if (S.run?.status === "running") { paintTimeline(); paintStatus(); } }, 100);
 document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") startRun(e); });
 $("run-form").addEventListener("submit", startRun);
+$("cancel-btn").addEventListener("click", async () => {
+  if (!S.run) return;
+  try { await api(`/api/runs/${S.run.id}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); }
+  catch (err) { $("form-error").textContent = err.message; }
+});
 
 (async function init() {
   S.wf = await api("/api/workflow");
