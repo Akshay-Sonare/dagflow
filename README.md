@@ -71,12 +71,14 @@ results in input order:
 def skus() -> list[str]:
     return fetch_catalog()
 
+
 @wf.task(map="skus", retries=2, cache=True)
-async def price(skus: str, ctx: Context) -> dict:   # skus is ONE item here
-    return await pricing_api(skus)                 # ctx.index is the item's position
+async def price(skus: str, ctx: Context) -> dict:  # skus is ONE item here
+    return await pricing_api(skus)  # ctx.index is the item's position
+
 
 @wf.task
-def cheapest(price: list[dict]) -> dict:            # the gathered list
+def cheapest(price: list[dict]) -> dict:  # the gathered list
     return min(price, key=lambda p: p["price"])
 ```
 
