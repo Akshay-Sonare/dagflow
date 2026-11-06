@@ -208,6 +208,7 @@ class Workflow:
         cache: Cache | None = None,
         fail_fast: bool = False,
         pools: Mapping[str, int] | None = None,
+        timeout: float | None = None,
         listeners: Iterable[Listener] = (),
     ) -> RunResult:
         """Run the workflow on the current event loop. See :meth:`run`."""
@@ -221,6 +222,7 @@ class Workflow:
             cache=cache,
             fail_fast=fail_fast,
             pools=pools,
+            timeout=timeout,
             bus=bus,
         )
         return await executor.execute(self.name, self._tasks, graph, params)
@@ -235,6 +237,7 @@ class Workflow:
         cache: Cache | None = None,
         fail_fast: bool = False,
         pools: Mapping[str, int] | None = None,
+        timeout: float | None = None,
         listeners: Iterable[Listener] = (),
     ) -> RunResult:
         """Validate and run the workflow, blocking until every task has settled.
@@ -247,6 +250,8 @@ class Workflow:
             cache: Backend for tasks declared with ``cache=True``.
             fail_fast: Cancel running tasks as soon as any task fails.
             pools: Limits for named task pools, e.g. ``{"api": 2}`` (see ``@task(pool=...)``).
+            timeout: Wall-clock limit (seconds) for the whole run; on expiry running tasks are
+                cancelled and the rest skipped.
             listeners: Callables that receive every :class:`~dagflow.events.Event`.
         """
         return asyncio.run(
@@ -258,6 +263,7 @@ class Workflow:
                 cache=cache,
                 fail_fast=fail_fast,
                 pools=pools,
+                timeout=timeout,
                 listeners=listeners,
             )
         )

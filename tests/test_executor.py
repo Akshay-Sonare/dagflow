@@ -208,6 +208,41 @@ def test_fail_fast_cancels_running_tasks() -> None:
     assert result.results["after_slow"].state is TaskState.SKIPPED
 
 
+def test_run_timeout_cancels_running_and_skips_rest() -> None:
+    wf = Workflow()
+
+    @wf.task
+    async def quick() -> int:
+        return 1
+
+    @wf.task
+    async def slow(quick: int) -> None:
+        await asyncio.sleep(5)
+
+    @wf.task
+    def after_slow(slow: None) -> None: ...
+
+    start = time.perf_counter()
+    result = wf.run(timeout=0.1)
+    assert time.perf_counter() - start < 1
+    assert not result.ok
+    assert result.results["quick"].state is TaskState.SUCCESS
+    assert result.results["slow"].state is TaskState.CANCELLED
+    assert result.results["after_slow"].state is TaskState.SKIPPED
+
+
+def test_run_timeout_not_hit_and_validated() -> None:
+    wf = Workflow()
+
+    @wf.task
+    def one() -> int:
+        return 1
+
+    assert wf.run(timeout=5).ok
+    with pytest.raises(ValueError, match="timeout"):
+        wf.run(timeout=0)
+
+
 def test_cache_skips_recomputation_and_keys_on_inputs() -> None:
     wf = Workflow()
     calls: list[int] = []
