@@ -224,3 +224,33 @@ def test_summary_reports_cache_hit_rate(tmp_path: Path, capsys: pytest.CaptureFi
     assert "cache: 0 hit, 1 miss (0%)" in capsys.readouterr().err
     assert main(["run", str(path), "-q", "--cache", cache]) == 0
     assert "cache: 1 hit, 0 miss (100%)" in capsys.readouterr().err
+
+
+PRICE_EXAMPLE = Path(__file__).parent.parent / "examples" / "price_check.py"
+
+
+def test_fan_out_example_output(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["run", str(PRICE_EXAMPLE), "-j", "4"]) == 0
+    out, err = capsys.readouterr()
+    assert "Checked 11 products" in out  # 12 SKUs, one discontinued and skipped
+    assert "⇉ price fans out over 12 items" in err
+    assert "↻ price[5]" in err  # the flaky SKU's retry is shown with its index
+    assert "⊘ price[8]" in err
+    assert "▶ price[" not in err  # per-item progress is kept out of the terminal
+    assert "price ×12" in err  # summary row
+
+
+def test_plan_marks_mapped_tasks(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["plan", str(PRICE_EXAMPLE)]) == 0
+    assert "stage 2: price (map over skus)" in capsys.readouterr().out
+
+
+def test_events_jsonl_carries_item_index(tmp_path: Path) -> None:
+    out = tmp_path / "events.jsonl"
+    assert main(["run", str(PRICE_EXAMPLE), "-q", "--events", str(out)]) == 0
+    events = [json.loads(line) for line in out.read_text().splitlines()]
+    mapped = [e for e in events if e["type"] == "task_mapped"]
+    assert mapped[0]["items"] == 12
+    assert {e["index"] for e in events if e["task"] == "price" and e["index"] is not None} == set(
+        range(12)
+    )

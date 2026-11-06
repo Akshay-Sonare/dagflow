@@ -455,3 +455,27 @@ def test_running_run_can_be_cancelled() -> None:
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_dashboard_reports_fan_out() -> None:
+    wf = Workflow("fan")
+
+    @wf.task(map="xs")
+    def each(xs: int) -> int:
+        return xs * 10
+
+    info = describe_workflow(wf)
+    assert info["tasks"][0]["map"] == "xs"
+    srv = DashboardServer(Dashboard(wf), port=0)
+    serve(srv)
+    try:
+        _, run = request(srv, "/api/runs", {"params": {"xs": "[1, 2, 3]"}})
+        events = stream(srv, run["id"])
+        assert next(e for e in events if e["type"] == "task_mapped")["items"] == 3
+        assert {e["index"] for e in events if e["index"] is not None} == {0, 1, 2}
+        _, detail = request(srv, f"/api/runs/{run['id']}")
+        assert detail["result"]["tasks"]["each"]["value"] == [10, 20, 30]
+        assert len(detail["result"]["tasks"]["each"]["items"]) == 3
+    finally:
+        srv.shutdown()
+        srv.server_close()

@@ -6,7 +6,7 @@ can catch the whole family with a single ``except`` clause.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 
 class DagflowError(Exception):
@@ -89,3 +89,17 @@ class Skip(DagflowError):
     def __init__(self, reason: str = "") -> None:
         super().__init__(reason or "skipped")
         self.reason = reason
+
+
+class MapError(DagflowError):
+    """Some items of a mapped task (``@task(map=...)``) failed after their retries."""
+
+    def __init__(self, task: str, total: int, failures: Mapping[int, BaseException]) -> None:
+        self.task = task
+        self.total = total
+        self.failures = dict(sorted(failures.items()))
+        shown = [f"[{i}] {type(e).__name__}: {e}" for i, e in list(self.failures.items())[:3]]
+        more = f" (+{len(self.failures) - 3} more)" if len(self.failures) > 3 else ""
+        super().__init__(
+            f"{len(self.failures)} of {total} items of {task!r} failed: " + "; ".join(shown) + more
+        )

@@ -91,6 +91,8 @@ def event_to_dict(event: Event) -> dict[str, Any]:
         "error": f"{type(event.error).__name__}: {event.error}" if event.error else None,
         "detail": event.detail,
         "timestamp": event.timestamp,
+        "index": event.index,
+        "items": event.items,
     }
 
 
@@ -120,6 +122,7 @@ def describe_workflow(workflow: Workflow) -> dict[str, Any]:
                 "timeout": item.timeout,
                 "cache": item.cache,
                 "is_async": item.is_async,
+                "map": item.map,
             }
         )
     return {
