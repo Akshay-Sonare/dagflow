@@ -427,3 +427,31 @@ def test_example_survives_concurrent_dashboard_runs() -> None:
     for record in records:
         retries = [e for e in record.events if e["type"] == "task_retrying"]
         assert len(retries) == 2  # every run still demonstrates the retry policy
+
+
+def test_running_run_can_be_cancelled() -> None:
+    wf = Workflow("slow")
+    started = threading.Event()
+
+    @wf.task
+    async def slow() -> None:
+        started.set()
+        await asyncio.sleep(30)
+
+    srv = DashboardServer(Dashboard(wf), port=0)
+    serve(srv)
+    try:
+        _, run = request(srv, "/api/runs", {})
+        assert started.wait(5)
+        status, _ = request(srv, f"/api/runs/{run['id']}/cancel", {})
+        assert status == 202
+        stream(srv, run["id"])  # ends once the run is finished
+        _, detail = request(srv, f"/api/runs/{run['id']}")
+        assert detail["status"] == "cancelled"
+        assert detail["error"] == "cancelled by user"
+        # Finished runs can't be cancelled again; unknown runs are 404.
+        assert request(srv, f"/api/runs/{run['id']}/cancel", {})[0] == 409
+        assert request(srv, "/api/runs/999/cancel", {})[0] == 404
+    finally:
+        srv.shutdown()
+        srv.server_close()
