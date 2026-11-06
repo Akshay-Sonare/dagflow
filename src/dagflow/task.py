@@ -32,6 +32,8 @@ class Context:
     task: str
     attempt: int
     max_attempts: int
+    index: int | None = None
+    """Position of the item being processed when the task is mapped (``@task(map=...)``)."""
 
     @property
     def is_retry(self) -> bool:
@@ -85,6 +87,8 @@ class Task:
     cache: bool = False
     tags: frozenset[str] = frozenset()
     pool: str | None = None
+    map: str | None = None
+    """Input parameter to fan out over: the task runs once per item of that iterable."""
     signature: inspect.Signature = field(init=False, repr=False)
     context_param: str | None = field(init=False, default=None)
 
@@ -101,6 +105,10 @@ class Task:
                 )
         object.__setattr__(self, "signature", signature)
         object.__setattr__(self, "context_param", _find_context_param(self.fn, signature))
+        if self.map is not None and self.map not in self.inputs:
+            raise ValueError(
+                f"task {self.name!r}: map={self.map!r} must name one of its inputs {self.inputs}"
+            )
 
     @property
     def is_async(self) -> bool:
@@ -154,6 +162,7 @@ def task(
     after: Iterable[str | Task] = (),
     tags: Iterable[str] = (),
     pool: str | None = None,
+    map: str | None = None,
 ) -> Callable[[TaskFn], Task]: ...
 
 
@@ -171,6 +180,7 @@ def task(
     after: Iterable[str | Task] = (),
     tags: Iterable[str] = (),
     pool: str | None = None,
+    map: str | None = None,
 ) -> Task | Callable[[TaskFn], Task]:
     """Turn a function into a :class:`Task`. Usable bare (``@task``) or with options.
 
@@ -186,6 +196,10 @@ def task(
         tags: Free-form labels, used for filtering and display.
         pool: Named concurrency pool; the run's ``pools={name: limit}`` caps how many tasks
             of that pool run at once (e.g. a rate-limited API).
+        map: Name of an input to fan out over. The task runs once per item of that
+            iterable (in parallel, each item with its own retries, timeout, cache entry and
+            pool slot) and its result is the list of per-item results, in input order.
+            Raising ``Skip`` for an item drops it from the list.
     """
 
     def wrap(func: TaskFn) -> Task:
@@ -203,6 +217,7 @@ def task(
             cache=cache,
             tags=frozenset(tags),
             pool=pool,
+            map=map,
         )
 
     return wrap(fn) if fn is not None else wrap

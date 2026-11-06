@@ -21,6 +21,7 @@ class EventType(StrEnum):
     TASK_FAILED = "task_failed"
     TASK_SKIPPED = "task_skipped"
     TASK_CANCELLED = "task_cancelled"
+    TASK_MAPPED = "task_mapped"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,10 @@ class Event:
     error: BaseException | None = None
     detail: str | None = None
     timestamp: float = field(default_factory=time.time)
+    index: int | None = None
+    """Item position for events about one item of a mapped task; ``None`` otherwise."""
+    items: int | None = None
+    """Number of items, on ``TASK_MAPPED`` events."""
 
 
 Listener = Callable[[Event], None]

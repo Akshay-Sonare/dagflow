@@ -80,7 +80,12 @@ class ConsoleReporter:
         EventType.TASK_FAILED: ("✗", "31"),
         EventType.TASK_SKIPPED: ("⊘", "90"),
         EventType.TASK_CANCELLED: ("■", "35"),
+        EventType.TASK_MAPPED: ("⇉", "36"),
     }
+    # Per-item progress of a mapped task is too chatty for a terminal; problems still show.
+    _QUIET_ITEM_EVENTS: ClassVar[frozenset[EventType]] = frozenset(
+        {EventType.TASK_STARTED, EventType.TASK_SUCCEEDED, EventType.TASK_CACHED}
+    )
 
     def __init__(self, stream: TextIO | None = None, *, color: bool | None = None) -> None:
         stream = stream or sys.stderr
@@ -98,8 +103,17 @@ class ConsoleReporter:
             return
         if event.type is EventType.RUN_FINISHED:
             return
+        if event.index is not None and event.type in self._QUIET_ITEM_EVENTS:
+            return
         symbol, code = self._STYLE[event.type]
-        parts = [f"  {self._paint(symbol, code)} {event.task}"]
+        label = event.task if event.index is None else f"{event.task}[{event.index}]"
+        if event.type is EventType.TASK_MAPPED:
+            label = f"{event.task} fans out over {event.items} items"
+            parts = [f"  {self._paint(symbol, code)} {label}"]
+            self.stream.write(" ".join(parts) + "\n")
+            self.stream.flush()
+            return
+        parts = [f"  {self._paint(symbol, code)} {label}"]
         if event.type is EventType.TASK_STARTED and event.attempt > 1:
             parts.append(f"(attempt {event.attempt})")
         if event.duration is not None:
@@ -124,10 +138,15 @@ class JsonLinesReporter:
 
 
 def format_summary(result: RunResult) -> str:
-    width = max((len(name) for name in result.results), default=4)
+    labels = {
+        name: name if r.items is None else f"{name} ×{len(r.items)}"
+        for name, r in result.results.items()
+    }
+    width = max((len(label) for label in labels.values()), default=4)
     lines = [f"{'task':<{width}}  {'state':<9}  {'tries':>5}  {'time':>7}"]
     for name, r in result.results.items():
-        lines.append(f"{name:<{width}}  {r.state:<9}  {r.attempts:>5}  {r.duration:>6.2f}s")
+        label = labels[name]
+        lines.append(f"{label:<{width}}  {r.state:<9}  {r.attempts:>5}  {r.duration:>6.2f}s")
     counts = {state: len(result.by_state(state)) for state in TaskState}
     tally = ", ".join(f"{n} {state}" for state, n in counts.items() if n)
     verdict = "succeeded" if result.ok else "FAILED"
@@ -179,12 +198,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _stage(wf: Workflow, layer: list[str]) -> str:
+    """Comma-separated task names, marking mapped tasks with what they fan out over."""
+    return ", ".join(
+        name if wf[name].map is None else f"{name} (map over {wf[name].map})" for name in layer
+    )
+
+
 def _dry_run(wf: Workflow, args: argparse.Namespace) -> int:
     """Validate against the given params and print the stages without running anything."""
     targets, tags = args.target or None, args.tag or None
     wf.validate(dict(args.param), targets=targets, tags=tags)
     for i, layer in enumerate(wf.plan(targets=targets, tags=tags), start=1):
-        print(f"stage {i}: {', '.join(layer)}")
+        print(f"stage {i}: {_stage(wf, layer)}")
     print("\ndry run: validation passed, nothing was executed", file=sys.stderr)
     return 0
 
@@ -202,7 +228,7 @@ def _cmd_graph(args: argparse.Namespace) -> int:
 def _cmd_plan(args: argparse.Namespace) -> int:
     wf = load_workflow(args.workflow)
     for i, layer in enumerate(wf.plan(targets=args.target or None, tags=args.tag or None), start=1):
-        print(f"stage {i}: {', '.join(layer)}")
+        print(f"stage {i}: {_stage(wf, layer)}")
     required = wf.required_params()
     if required:
         print("\nrequired params:")

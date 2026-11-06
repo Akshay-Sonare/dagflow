@@ -19,7 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from dagflow.cache import MISSING, Cache, cache_key
-from dagflow.errors import Skip, TaskFailedError, TaskTimeoutError
+from dagflow.errors import MapError, Skip, TaskFailedError, TaskTimeoutError
 from dagflow.events import Event, EventBus, EventType
 from dagflow.graph import DAG
 from dagflow.task import Context, Task
@@ -51,6 +51,8 @@ class TaskResult:
     upstream: tuple[str, ...] = ()
     cache_lookup: bool = False
     """True if a cache lookup was made for this task (it is cached and its inputs hash)."""
+    items: list[TaskResult] | None = None
+    """Per-item results of a mapped task (``@task(map=...)``), in input order."""
 
 
 @dataclass(slots=True)
@@ -111,7 +113,8 @@ class RunResult:
         Only tasks that consulted the cache count; tasks skipped or cancelled before
         running never looked, and uncacheable inputs bypass the cache entirely.
         """
-        lookups = [r for r in self.results.values() if r.cache_lookup]
+        everything = [leaf for r in self.results.values() for leaf in (r.items if r.items else [r])]
+        lookups = [r for r in everything if r.cache_lookup]
         hits = sum(r.state is TaskState.CACHED for r in lookups)
         return {
             "hits": hits,
@@ -134,10 +137,32 @@ class RunResult:
                     "duration": round(r.duration, 4),
                     "value": r.value if r.state.ok else None,
                     "error": f"{type(r.error).__name__}: {r.error}" if r.error else None,
+                    **({"items": [_item_dict(i) for i in r.items]} if r.items is not None else {}),
                 }
                 for name, r in self.results.items()
             },
         }
+
+
+def _item_dict(r: TaskResult) -> dict[str, Any]:
+    return {
+        "state": str(r.state),
+        "attempts": r.attempts,
+        "duration": round(r.duration, 4),
+        "error": f"{type(r.error).__name__}: {r.error}" if r.error else None,
+    }
+
+
+def _map_items(task: Task, inputs: Mapping[str, Any]) -> list[Any]:
+    """The items a mapped task fans out over, from its inputs or the parameter default."""
+    assert task.map is not None
+    source = inputs.get(task.map, task.signature.parameters[task.map].default)
+    if isinstance(source, str | bytes) or not isinstance(source, Iterable):
+        raise TypeError(
+            f"task {task.name!r} maps over {task.map!r}, which must be a list or other "
+            f"iterable of items, not {type(source).__name__}"
+        )
+    return list(source)
 
 
 class Executor:
@@ -298,7 +323,97 @@ class Executor:
         run_id: str,
         gate: asyncio.Semaphore | None = None,
     ) -> TaskResult:
+        if task.map is None:
+            return await self._run_one(task, inputs, semaphore, run_id, gate=gate)
+        return await self._run_mapped(task, inputs, semaphore, run_id, gate)
+
+    async def _run_mapped(
+        self,
+        task: Task,
+        inputs: dict[str, Any],
+        semaphore: asyncio.Semaphore,
+        run_id: str,
+        gate: asyncio.Semaphore | None,
+    ) -> TaskResult:
+        """Fan out: run the task once per item concurrently, then gather the results.
+
+        Items share the run's concurrency limit and the task's pool, and each has its own
+        retries, timeout and cache entry. Any item failing (after its retries) fails the
+        task with a :class:`MapError`; items raising ``Skip`` are dropped from the result.
+        """
+        assert task.map is not None
         result = TaskResult(task.name)
+        started = time.perf_counter()
+        self.bus.emit(Event(EventType.TASK_STARTED, task.name, attempt=1))
+        try:
+            items = _map_items(task, inputs)
+        except TypeError as exc:
+            result.state, result.error = TaskState.FAILED, exc
+            result.duration = time.perf_counter() - started
+            self.bus.emit(
+                Event(EventType.TASK_FAILED, task.name, duration=result.duration, error=exc)
+            )
+            return result
+        self.bus.emit(
+            Event(EventType.TASK_MAPPED, task.name, items=len(items), detail=f"{len(items)} items")
+        )
+        children = await asyncio.gather(
+            *(
+                self._run_one(
+                    task, {**inputs, task.map: item}, semaphore, run_id, gate=gate, index=i
+                )
+                for i, item in enumerate(items)
+            )
+        )
+        result.items = list(children)
+        result.attempts = sum(child.attempts for child in children)
+        result.duration = time.perf_counter() - started
+        failures = {
+            i: child.error or RuntimeError("failed")
+            for i, child in enumerate(children)
+            if child.state is TaskState.FAILED
+        }
+        if failures:
+            result.state, result.error = TaskState.FAILED, MapError(task.name, len(items), failures)
+            self.bus.emit(
+                Event(
+                    EventType.TASK_FAILED,
+                    task.name,
+                    attempt=result.attempts,
+                    duration=result.duration,
+                    error=result.error,
+                )
+            )
+            return result
+        kept = [child for child in children if child.state.ok]
+        result.value = [child.value for child in kept]
+        all_cached = bool(children) and all(c.state is TaskState.CACHED for c in children)
+        result.state = TaskState.CACHED if all_cached else TaskState.SUCCESS
+        dropped = len(children) - len(kept)
+        detail = f"{len(kept)}/{len(items)} items" + (f", {dropped} skipped" if dropped else "")
+        self.bus.emit(
+            Event(
+                EventType.TASK_SUCCEEDED,
+                task.name,
+                attempt=result.attempts,
+                duration=result.duration,
+                detail=detail,
+            )
+        )
+        return result
+
+    async def _run_one(
+        self,
+        task: Task,
+        inputs: dict[str, Any],
+        semaphore: asyncio.Semaphore,
+        run_id: str,
+        *,
+        gate: asyncio.Semaphore | None = None,
+        index: int | None = None,
+    ) -> TaskResult:
+        """Run ``task`` (or one item of a mapped task when ``index`` is set) to completion."""
+        result = TaskResult(task.name if index is None else f"{task.name}[{index}]")
         started = time.perf_counter()
         cache = self.cache if task.cache else None
         key = cache_key(task, inputs) if cache is not None else None
@@ -313,25 +428,40 @@ class Executor:
             if hit is not MISSING:
                 result.state, result.value = TaskState.CACHED, hit
                 result.duration = time.perf_counter() - started
-                self.bus.emit(Event(EventType.TASK_CACHED, task.name, duration=result.duration))
+                self.bus.emit(
+                    Event(EventType.TASK_CACHED, task.name, duration=result.duration, index=index)
+                )
                 return result
 
         while True:
             result.attempts += 1
-            self.bus.emit(Event(EventType.TASK_STARTED, task.name, attempt=result.attempts))
             try:
                 call_inputs = inputs
                 if task.context_param is not None:
-                    ctx = Context(run_id, task.name, result.attempts, task.retry.max_attempts)
+                    ctx = Context(
+                        run_id, task.name, result.attempts, task.retry.max_attempts, index
+                    )
                     call_inputs = {**inputs, task.context_param: ctx}
                 # Pool first, so a task waiting on a full pool doesn't hold a global slot.
                 async with gate or contextlib.nullcontext(), semaphore:
+                    # Announced once it holds its slots, so a wide fan-out doesn't report
+                    # hundreds of items "started" while they are only queued.
+                    self.bus.emit(
+                        Event(
+                            EventType.TASK_STARTED, task.name, attempt=result.attempts, index=index
+                        )
+                    )
                     value = await self._invoke(task, call_inputs)
             except Skip as skip:
                 result.state = TaskState.SKIPPED
                 result.duration = time.perf_counter() - started
                 self.bus.emit(
-                    Event(EventType.TASK_SKIPPED, task.name, detail=skip.reason or "skipped")
+                    Event(
+                        EventType.TASK_SKIPPED,
+                        task.name,
+                        detail=skip.reason or "skipped",
+                        index=index,
+                    )
                 )
                 return result
             except Exception as exc:
@@ -344,6 +474,7 @@ class Executor:
                             attempt=result.attempts,
                             error=exc,
                             detail=f"retrying in {delay:.2f}s",
+                            index=index,
                         )
                     )
                     await asyncio.sleep(delay)
@@ -357,6 +488,7 @@ class Executor:
                         attempt=result.attempts,
                         duration=result.duration,
                         error=exc,
+                        index=index,
                     )
                 )
                 return result
@@ -375,6 +507,7 @@ class Executor:
                 task.name,
                 attempt=result.attempts,
                 duration=result.duration,
+                index=index,
             )
         )
         return result

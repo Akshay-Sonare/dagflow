@@ -46,6 +46,7 @@ print(result["revenue"])
 | **Event-driven scheduler** | A task starts the instant its last dependency finishes, not when a whole "layer" is done. Bounded by a concurrency semaphore. |
 | **Sync + async** | `async def` tasks are awaited; blocking functions are moved to threads automatically. |
 | **Retries** | Exponential back-off with a cap and exception filtering. Back-off sleeps don't hold a concurrency slot. |
+| **Dynamic fan-out** | `@task(map="items")` runs a task once per item of an upstream list, in parallel, each item with its own retries, timeout, cache entry and pool slot; downstream gets the list of results. |
 | **Pools** | `@task(pool="api")` plus `wf.run(pools={"api": 2})` caps how many tasks of a pool run at once, on top of `max_concurrency`. |
 | **Timeouts** | Per-attempt, distinguishing a real timeout from a `TimeoutError` the task raised itself. |
 | **Opt-out** | Raise `dagflow.Skip("reason")` from a task to skip it (and its descendants) on purpose; no retries, and the run still counts as successful. |
@@ -58,6 +59,40 @@ print(result["revenue"])
 | **Observability** | Typed lifecycle events on a pub/sub bus; the CLI's live reporter is just one listener. |
 | **Visualisation** | Export the graph as Mermaid or Graphviz DOT. |
 | **Web dashboard** | `dagflow ui` serves a live, zero-dependency dashboard: graph, timeline, task inspector and run history. |
+
+## Dynamic fan-out
+
+When the amount of work is only known at run time (one call per URL, file, customer…),
+map a task over a list. dagflow runs it once per item, concurrently, and gathers the
+results in input order:
+
+```python
+@wf.task
+def skus() -> list[str]:
+    return fetch_catalog()
+
+
+@wf.task(map="skus", retries=2, cache=True)
+async def price(skus: str, ctx: Context) -> dict:  # skus is ONE item here
+    return await pricing_api(skus)  # ctx.index is the item's position
+
+
+@wf.task
+def cheapest(price: list[dict]) -> dict:  # the gathered list
+    return min(price, key=lambda p: p["price"])
+```
+
+- **Parallel but bounded:** items share the run's `max_concurrency` and the task's `pool`.
+- **Per-item resilience:** each item retries and times out on its own; its cache entry is
+  keyed on that item, so re-running with one new item only computes the new one.
+- **Clear failures:** if items still fail after retries, the task fails with a `MapError`
+  naming them (`2 of 12 items of 'price' failed: [3] …`) and its dependents are skipped.
+  Raise `Skip` from an item to drop just that item.
+- **Visible:** the CLI prints `⇉ price fans out over 12 items` and shows `price ×12` in the
+  summary; the dashboard draws the task as a stack with a live `7/12 done` count and a
+  per-item grid.
+
+Try it: `dagflow run examples/price_check.py -j 4` or `dagflow ui examples/price_check.py`.
 
 ## Install
 

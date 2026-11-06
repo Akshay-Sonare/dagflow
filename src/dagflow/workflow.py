@@ -80,6 +80,7 @@ class Workflow:
         after: Iterable[str | Task] = (),
         tags: Iterable[str] = (),
         pool: str | None = None,
+        map: str | None = None,
     ) -> Callable[[TaskFn], Task]: ...
 
     def task(
@@ -97,6 +98,7 @@ class Workflow:
         after: Iterable[str | Task] = (),
         tags: Iterable[str] = (),
         pool: str | None = None,
+        map: str | None = None,
     ) -> Task | Callable[[TaskFn], Task]:
         """Decorator form of :func:`dagflow.task` that also registers the task."""
 
@@ -112,6 +114,7 @@ class Workflow:
                 after=after,
                 tags=tags,
                 pool=pool,
+                map=map,
             )(func)
             self.add(created)
             return created

@@ -23,6 +23,8 @@
     }
   }
   * { box-sizing: border-box; }
+  /* Classes like .run-btn set display, which would otherwise override the hidden attribute. */
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   button, input { font: inherit; color: inherit; }
@@ -99,6 +101,16 @@
   .node.cached rect.box { stroke: var(--cached); } .node.cached rect.bar { fill: var(--cached); }
   .node.failed rect.box { stroke: var(--failed); } .node.failed rect.bar { fill: var(--failed); }
   .node.cancelled rect.box { stroke: var(--cancelled); } .node.cancelled rect.bar { fill: var(--cancelled); }
+  .node rect.stack { fill: var(--panel-2); stroke: var(--pending); stroke-width: 1.2; }
+  .node rect.prog { fill: var(--success); transition: width .2s; }
+  .node.failed rect.prog { fill: var(--failed); }
+  .items { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+  .items i { width: 14px; height: 14px; border-radius: 3px; background: var(--pending); cursor: help; }
+  .items i.running { background: var(--running); animation: pulse 1s infinite; }
+  .items i.retrying { background: var(--retrying); animation: pulse 1s infinite; }
+  .items i.success { background: var(--success); } .items i.cached { background: var(--cached); }
+  .items i.failed { background: var(--failed); } .items i.skipped { background: var(--skipped); opacity: .55; }
+  .items-summary { font-size: 12px; color: var(--muted); margin-top: 12px; }
   .node.skipped, .node.idle { opacity: .45; }
   .node.skipped rect.box { stroke-dasharray: 5 4; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 14px 12px; font-size: 12px; color: var(--muted); }
@@ -136,7 +148,7 @@
   .sym-task_started { color: var(--running); } .sym-task_retrying { color: var(--retrying); }
   .sym-task_succeeded { color: var(--success); } .sym-task_cached { color: var(--cached); }
   .sym-task_failed { color: var(--failed); } .sym-task_skipped { color: var(--skipped); }
-  .sym-task_cancelled { color: var(--cancelled); } .sym-run_started, .sym-run_finished { color: var(--accent); }
+  .sym-task_cancelled { color: var(--cancelled); } .sym-task_mapped { color: var(--accent); } .sym-run_started, .sym-run_finished { color: var(--accent); }
 
   @keyframes pulse { 50% { opacity: .35; } }
   @keyframes glow { 50% { stroke-opacity: .35; } }
@@ -210,8 +222,10 @@
 <script>
 "use strict";
 const NODE_W = 168, NODE_H = 50, GAP_X = 46, GAP_Y = 16, PAD = 12, MIN_SCALE = 0.85;
-const SYMBOL = { run_started: "◆", run_finished: "◆", task_started: "▶", task_retrying: "↻",
+const SYMBOL = { run_started: "◆", run_finished: "◆", task_started: "▶", task_retrying: "↻", task_mapped: "⇉",
   task_succeeded: "✓", task_cached: "●", task_failed: "✗", task_skipped: "⊘", task_cancelled: "■" };
+// Item states that count as "done" for a mapped task's progress.
+const ITEM_DONE = new Set(["success", "cached", "skipped", "failed"]);
 const STATE_LABEL = { idle: "not in run", pending: "waiting", running: "running", retrying: "retrying",
   success: "succeeded", cached: "cached", failed: "failed", skipped: "skipped", cancelled: "cancelled" };
 
@@ -290,7 +304,10 @@ function drawGraph() {
         tabindex: 0, role: "button", "aria-label": `Task ${t.name}`,
         onclick: () => select(t.name), onkeydown: (e) => { if (e.key === "Enter") select(t.name); } },
       el("title", {}, t.doc || t.name),
+      // A mapped task is drawn as a small deck of cards: one card per item.
+      t.map ? el("rect", { class: "stack", x: 5, y: 5, width: NODE_W, height: NODE_H, rx: 9 }) : null,
       el("rect", { class: "box", width: NODE_W, height: NODE_H, rx: 9 }),
+      t.map ? el("rect", { class: "prog", x: 4, y: NODE_H - 5, width: 0, height: 3, rx: 1.5 }) : null,
       el("rect", { class: "bar", x: 0, y: 8, width: 4, height: NODE_H - 16, rx: 2 }),
       el("text", { class: "name", x: 14, y: 21 }, clip(t.name, 19)),
       el("text", { class: "sub", x: 14, y: 38 }, "")));
@@ -313,6 +330,7 @@ window.addEventListener("resize", () => { if (S.wf) fitGraph(); });
 
 function metaLine(t) {
   const bits = [t.is_async ? "async" : "sync"];
+  if (t.map) bits.unshift(`⇉ ${t.map}`);
   if (t.retries) bits.push(`${t.retries} retries`);
   if (t.cache) bits.push("cache on");
   if (t.timeout) bits.push(`${t.timeout}s timeout`);
@@ -330,6 +348,13 @@ function paintGraph() {
       sub = `${STATE_LABEL[st.state]} · ${fmt(st.duration)}${st.attempts > 1 ? ` · ${st.attempts} tries` : ""}`;
     else if (st.state === "cached") sub = "cached result";
     else if (st.state === "skipped") sub = "skipped";
+    if (st.size != null) {
+      const done = st.items.filter((i) => ITEM_DONE.has(i.state)).length;
+      if (st.state === "running") sub = `fan-out · ${done}/${st.size} done`;
+      else if (["success", "failed", "cached"].includes(st.state))
+        sub = `${STATE_LABEL[st.state]} · ${fmt(st.duration)} · ×${st.size}`;
+      node.querySelector("rect.prog")?.setAttribute("width", st.size ? ((NODE_W - 8) * done) / st.size : 0);
+    } else node.querySelector("rect.prog")?.setAttribute("width", 0);
     node.querySelector("text.sub").textContent = sub;
   }
   for (const edge of document.querySelectorAll(".edge")) {
@@ -342,7 +367,7 @@ function paintGraph() {
 // ---------- run state ----------
 function resetTasks(state) {
   S.tasks = {};
-  for (const t of S.wf.tasks) S.tasks[t.name] = { state, attempts: 0, start: null, end: null, duration: null, error: null, retries: [] };
+  for (const t of S.wf.tasks) S.tasks[t.name] = { state, attempts: 0, start: null, end: null, duration: null, error: null, retries: [], size: null, items: [] };
   S.events = []; S.t0 = null; S.tEnd = null;
   $("log").replaceChildren();
 }
@@ -350,7 +375,12 @@ function resetTasks(state) {
 function apply(e) {
   S.events.push(e);
   const t = e.task && S.tasks[e.task];
+  if (t && e.index != null) { applyItem(t, e); logLine(e); return; }
   switch (e.type) {
+    case "task_mapped":
+      t.size = e.items;
+      t.items = Array.from({ length: e.items }, () => ({ state: "pending", attempts: 0, error: null }));
+      break;
     case "run_started": S.t0 = e.timestamp; break;
     case "run_finished": S.tEnd = e.timestamp; break;
     case "task_started": Object.assign(t, { state: "running", attempts: e.attempt }); t.start ??= e.timestamp; break;
@@ -364,13 +394,27 @@ function apply(e) {
   logLine(e);
 }
 
+// One item of a mapped task; the task itself keeps its own overall state.
+function applyItem(t, e) {
+  const item = (t.items[e.index] ??= { state: "pending", attempts: 0, error: null });
+  switch (e.type) {
+    case "task_started": Object.assign(item, { state: "running", attempts: e.attempt }); break;
+    case "task_retrying": Object.assign(item, { state: "retrying", error: e.error }); t.retries.push(e.timestamp); break;
+    case "task_succeeded": Object.assign(item, { state: "success", error: null }); break;
+    case "task_cached": item.state = "cached"; break;
+    case "task_failed": Object.assign(item, { state: "failed", error: e.error }); break;
+    case "task_skipped": Object.assign(item, { state: "skipped", error: e.detail }); break;
+  }
+}
+
 function logLine(e) {
   const off = S.t0 ? "+" + (e.timestamp - S.t0).toFixed(2) + "s" : "";
   let msg;
   if (e.type === "run_started") msg = [el("b", {}, "run started")];
   else if (e.type === "run_finished") msg = [el("b", {}, `run ${e.detail}`), el("em", {}, ` in ${fmt(e.duration)}`)];
+  else if (e.type === "task_mapped") msg = [e.task, el("em", {}, ` fans out over ${e.items} items`)];
   else {
-    msg = [e.task];
+    msg = [e.index != null ? `${e.task}[${e.index}]` : e.task];
     if (e.type === "task_started" && e.attempt > 1) msg.push(el("em", {}, ` attempt ${e.attempt}`));
     if (e.duration != null && e.type !== "task_retrying") msg.push(el("em", {}, ` ${fmt(e.duration)}`));
     if (e.error) msg.push(el("span", { class: "err" }, ` — ${e.error}`));
@@ -417,17 +461,33 @@ function paintDetails() {
     ["cache", spec.cache ? "yes" : "no"],
     ["tags", spec.tags.length ? spec.tags.join(", ") : "—"],
   ];
+  if (spec.map) rows.splice(1, 0, ["fan-out", `once per item of “${spec.map}”`]);
   if (st.attempts) rows.push(["attempts", String(st.attempts)]);
   if (st.duration != null) rows.push(["duration", fmt(st.duration)]);
   if (st.error) rows.push(["last error", el("span", { class: st.state === "skipped" ? "muted" : "err" }, st.error)]);
   const children = [el("h3", {}, name)];
   if (spec.doc) children.push(el("p", { class: "doc" }, spec.doc));
   children.push(el("dl", {}, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])));
+  if (st.size != null) children.push(...itemsView(st));
   if (result && result.value !== null && result.value !== undefined) {
     const text = JSON.stringify(result.value, null, 2);
     children.push(el("pre", { class: "value", "aria-label": "Result value" }, clip(text, 6000)));
   }
   box.replaceChildren(...children);
+}
+
+// A square per item of a mapped task, coloured by state; hover for details.
+function itemsView(st) {
+  const counts = {};
+  for (const item of st.items) counts[item.state] = (counts[item.state] ?? 0) + 1;
+  const summary = Object.entries(counts).map(([state, n]) => `${n} ${STATE_LABEL[state] ?? state}`).join(" · ");
+  const shown = st.items.slice(0, 500);
+  return [
+    el("div", { class: "items-summary" }, `${st.size} items${summary ? ": " + summary : ""}`),
+    el("div", { class: "items", role: "list", "aria-label": "Item states" }, ...shown.map((item, i) =>
+      el("i", { class: item.state, role: "listitem",
+        title: `[${i}] ${STATE_LABEL[item.state] ?? item.state}${item.attempts > 1 ? ` · ${item.attempts} tries` : ""}${item.error ? " — " + item.error : ""}` }))),
+  ];
 }
 
 function paintStatus() {
