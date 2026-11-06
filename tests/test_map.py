@@ -225,7 +225,7 @@ def test_each_item_is_cached_separately() -> None:
     wf.run({"xs": [1, 2, 3]}, cache=cache)
     second = wf.run({"xs": [1, 2, 3, 4]}, cache=cache)
     assert second["slow_square"] == [1, 4, 9, 16]
-    assert calls == [1, 2, 3, 4]  # only the new item was computed
+    assert sorted(calls) == [1, 2, 3, 4]  # items run concurrently; only the new item was computed
     assert second.cache_stats() == {"hits": 3, "misses": 1, "hit_rate": 0.75}
     third = wf.run({"xs": [1, 2]}, cache=cache)
     assert third.results["slow_square"].state is TaskState.CACHED
