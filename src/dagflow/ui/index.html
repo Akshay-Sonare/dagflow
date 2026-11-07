@@ -187,6 +187,7 @@
           Run workflow <kbd>⌘↵</kbd>
         </button>
         <button class="run-btn cancel-btn" id="cancel-btn" type="button" hidden>Cancel run</button>
+        <a id="export-link" href="#" hidden>Export run as JSON</a>
         <div class="form-error" id="form-error" role="alert"></div>
       </form>
     </section>
@@ -498,6 +499,9 @@ function paintStatus() {
   $("elapsed").textContent = S.t0 ? fmt((S.tEnd ?? Date.now() / 1000) - S.t0) : "";
   $("run-btn").disabled = status === "running";
   $("cancel-btn").hidden = status !== "running";
+  const link = $("export-link");
+  link.hidden = !S.run || status === "running";
+  if (S.run) link.href = `/api/runs/${S.run.id}/export`;
 }
 
 function paint() { paintGraph(); paintTimeline(); paintDetails(); paintStatus(); }

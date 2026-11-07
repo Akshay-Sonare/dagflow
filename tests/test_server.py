@@ -479,3 +479,26 @@ def test_dashboard_reports_fan_out() -> None:
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_run_can_be_exported_as_a_download() -> None:
+    wf = Workflow("exp")
+
+    @wf.task
+    def one() -> int:
+        return 1
+
+    srv = DashboardServer(Dashboard(wf), port=0)
+    serve(srv)
+    try:
+        _, run = request(srv, "/api/runs", {})
+        stream(srv, run["id"])
+        with urllib.request.urlopen(f"{srv.url}api/runs/{run['id']}/export", timeout=5) as res:
+            assert (
+                res.headers["Content-Disposition"] == f'attachment; filename="run-{run["id"]}.json"'
+            )
+            assert json.loads(res.read())["id"] == run["id"]
+        assert request(srv, "/api/runs/999/export")[0] == 404
+    finally:
+        srv.shutdown()
+        srv.server_close()

@@ -175,6 +175,7 @@ The JSON API behind it is usable on its own:
 | `POST` | `/api/runs` | start a run: `{"params": {...}, "tags": [...], "targets": [...]}` |
 | `GET` | `/api/runs` | recent runs, newest first |
 | `GET` | `/api/runs/<id>` | one run with all its events and results |
+| `GET` | `/api/runs/<id>/export` | the run's JSON as a file download (also linked from the page) |
 | `POST` | `/api/runs/<id>/cancel` | stop a running run (`409` if it already finished) |
 | `GET` | `/api/runs/<id>/events` | live `text/event-stream` of events |
 

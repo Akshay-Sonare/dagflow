@@ -11,6 +11,7 @@ API:
     GET  /api/runs               recent runs, newest first
     POST /api/runs               start a run: {"params": {}, "targets": [], "tags": []}
     GET  /api/runs/<id>          one run with its events and final result
+    GET  /api/runs/<id>/export   the same JSON, served as a file download
     POST /api/runs/<id>/cancel   stop a running run (409 if it already finished)
     GET  /api/runs/<id>/events   live event stream (text/event-stream); each event
                                  carries ``id: <n>`` and ``Last-Event-ID`` resumes
@@ -314,9 +315,17 @@ class _Handler(BaseHTTPRequestHandler):
         if self.server.verbose:
             super().log_message(format, *args)
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(
+        self,
+        status: int,
+        body: bytes,
+        content_type: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         if self.close_connection:
@@ -326,6 +335,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _json(self, payload: Any, status: int = HTTPStatus.OK) -> None:
         self._send(status, json.dumps(payload).encode(), "application/json")
+
+    def _export(self, record: RunRecord) -> None:
+        body = json.dumps(record.to_dict(), indent=2).encode()
+        self._send(
+            HTTPStatus.OK,
+            body,
+            "application/json",
+            {"Content-Disposition": f'attachment; filename="run-{record.id}.json"'},
+        )
 
     def _error(self, status: int, message: str) -> None:
         self._json({"error": message}, status)
@@ -383,6 +401,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif len(parts) == 3 and parts[:2] == ["api", "runs"]:
             if record := self._run_from_path(parts[2]):
                 self._json(record.to_dict())
+        elif len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "export":
+            if record := self._run_from_path(parts[2]):
+                self._export(record)
         elif len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "events":
             if record := self._run_from_path(parts[2]):
                 self._stream(record)
