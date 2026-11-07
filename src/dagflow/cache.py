@@ -132,6 +132,23 @@ class SQLiteCache:
             (count,) = self._conn.execute("SELECT COUNT(*) FROM results").fetchone()
         return int(count)
 
+    def stats(self) -> dict[str, Any]:
+        """Entry count, stored bytes and the oldest/newest write time (epoch seconds)."""
+        with self._lock:
+            count, size, oldest, newest = self._conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(LENGTH(value)), 0), MIN(created), MAX(created)"
+                " FROM results"
+            ).fetchone()
+        return {"entries": count, "bytes": size, "oldest": oldest, "newest": newest}
+
+    def purge(self, older_than: float) -> int:
+        """Delete entries written more than ``older_than`` seconds ago; return how many."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM results WHERE created < ?", (time.time() - older_than,)
+            )
+        return cur.rowcount
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
