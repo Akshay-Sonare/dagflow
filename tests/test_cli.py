@@ -1,6 +1,8 @@
 import argparse
 import json
 import socket
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -254,3 +256,11 @@ def test_events_jsonl_carries_item_index(tmp_path: Path) -> None:
     assert {e["index"] for e in events if e["task"] == "price" and e["index"] is not None} == set(
         range(12)
     )
+
+
+def test_python_dash_m_dagflow_runs_the_cli() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-m", "dagflow", "--help"], capture_output=True, text=True, check=False
+    )
+    assert proc.returncode == 0
+    assert "dagflow" in proc.stdout
