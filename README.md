@@ -133,6 +133,7 @@ Other commands:
 
 ```bash
 dagflow plan  examples/sales_report.py              # execution stages + required params
+dagflow plan  examples/sales_report.py --json       # the same plan as machine-readable JSON
 dagflow graph examples/sales_report.py              # Mermaid diagram
 dagflow graph examples/sales_report.py -f dot | dot -Tpng > graph.png
 dagflow run   examples/sales_report.py -t revenue_by_customer --json

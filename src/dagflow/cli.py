@@ -227,9 +227,31 @@ def _cmd_graph(args: argparse.Namespace) -> int:
 
 def _cmd_plan(args: argparse.Namespace) -> int:
     wf = load_workflow(args.workflow)
-    for i, layer in enumerate(wf.plan(targets=args.target or None, tags=args.tag or None), start=1):
-        print(f"stage {i}: {_stage(wf, layer)}")
+    stages = wf.plan(targets=args.target or None, tags=args.tag or None)
     required = wf.required_params()
+    if args.json:
+        doc = {
+            "workflow": wf.name,
+            "stages": [
+                [
+                    {
+                        "name": name,
+                        "depends_on": sorted(wf.dag().upstream(name)),
+                        "tags": sorted(wf[name].tags),
+                        "map": wf[name].map,
+                        "pool": wf[name].pool,
+                        "cache": wf[name].cache,
+                    }
+                    for name in layer
+                ]
+                for layer in stages
+            ],
+            "required_params": {param: sorted(users) for param, users in sorted(required.items())},
+        }
+        print(json.dumps(doc, indent=2))
+        return 0
+    for i, layer in enumerate(stages, start=1):
+        print(f"stage {i}: {_stage(wf, layer)}")
     if required:
         print("\nrequired params:")
         for param, users in sorted(required.items()):
@@ -310,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = sub.add_parser("plan", help="show execution stages without running")
     common(plan)
+    plan.add_argument("--json", action="store_true", help="print the plan as JSON on stdout")
     plan.set_defaults(handler=_cmd_plan)
 
     ui = sub.add_parser("ui", help="open a live web dashboard for a workflow")
