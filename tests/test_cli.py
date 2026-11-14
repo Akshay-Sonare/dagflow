@@ -1,6 +1,8 @@
 import argparse
 import json
 import socket
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -277,6 +279,14 @@ def test_plan_json_marks_mapped_tasks(capsys: pytest.CaptureFixture[str]) -> Non
     doc = json.loads(capsys.readouterr().out)
     mapped = [t for stage in doc["stages"] for t in stage if t["map"]]
     assert [(t["name"], t["map"]) for t in mapped] == [("price", "skus")]
+
+
+def test_python_dash_m_dagflow_runs_the_cli() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-m", "dagflow", "--help"], capture_output=True, text=True, check=False
+    )
+    assert proc.returncode == 0
+    assert "dagflow" in proc.stdout
 
 
 def _seed_cache(path: Path) -> None:

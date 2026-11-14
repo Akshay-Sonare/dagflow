@@ -81,3 +81,11 @@ def test_exports(diamond: DAG) -> None:
     dot = diamond.to_dot("demo")
     assert 'digraph "demo"' in dot
     assert '"c" -> "d";' in dot
+
+
+def test_cycle_report_ignores_acyclic_tails() -> None:
+    # "x" feeds the cycle and "z" hangs off it; neither belongs in the reported path.
+    dag = DAG("xabz", [("x", "a"), ("a", "b"), ("b", "a"), ("b", "z")])
+    with pytest.raises(CycleError) as exc:
+        dag.topological_order()
+    assert exc.value.cycle == ["a", "b", "a"]

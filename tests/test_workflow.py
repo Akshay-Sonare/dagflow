@@ -223,3 +223,38 @@ def test_unknown_tag_raises() -> None:
 
 def test_plan_filters_by_tag() -> None:
     assert _tagged_workflow().plan(tags=["etl"]) == [["a", "c"]]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_attempts": 0},
+        {"backoff": -1.0},
+        {"max_backoff": -1.0},
+        {"multiplier": 0.5},
+        {"jitter": 1.5},
+        {"jitter": -0.1},
+    ],
+)
+def test_retry_policy_rejects_invalid_values(kwargs: dict[str, float]) -> None:
+    with pytest.raises(ValueError, match="must"):
+        RetryPolicy(**kwargs)  # type: ignore[arg-type]
+
+
+def test_workflow_behaves_like_a_task_container() -> None:
+    wf = Workflow("demo")
+
+    @wf.task
+    def one() -> int:
+        return 1
+
+    assert len(wf) == 1
+    assert "one" in wf
+    assert "two" not in wf
+    assert wf["one"] is one
+    assert list(wf) == [one]
+    assert "one" in wf.tasks
+    with pytest.raises(UnknownTaskError):
+        wf["two"]
+    with pytest.raises(TypeError):
+        wf.tasks["x"] = one  # type: ignore[index]
