@@ -328,3 +328,27 @@ def test_cache_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Non
     junk.write_text("not a database" * 100)
     assert main(["cache", "info", str(junk)]) == 2
     assert "error:" in capsys.readouterr().err
+
+
+def test_run_output_writes_json_file_and_keeps_summary(
+    wf_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "result.json"
+    assert main(["run", str(wf_file), "-q", "--output", str(out)]) == 0
+    doc = json.loads(out.read_text())
+    assert doc["ok"] is True
+    assert "workflow" in capsys.readouterr().err
+
+
+def test_run_output_written_even_when_run_fails(tmp_path: Path) -> None:
+    flow = tmp_path / "bad.py"
+    flow.write_text(
+        "from dagflow import Workflow\n"
+        "workflow = Workflow()\n"
+        "@workflow.task\n"
+        "def boom():\n"
+        "    raise RuntimeError('x')\n"
+    )
+    out = tmp_path / "r.json"
+    assert main(["run", str(flow), "-q", "-o", str(out)]) == 1
+    assert json.loads(out.read_text())["ok"] is False
