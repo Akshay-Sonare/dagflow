@@ -7,8 +7,10 @@ import importlib
 import importlib.util
 import json
 import os
+import sqlite3
 import sys
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, TextIO
 
@@ -288,6 +290,35 @@ def _cmd_ui(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_cache(args: argparse.Namespace) -> int:
+    path = Path(args.path)
+    if not path.is_file():  # SQLiteCache would silently create an empty database
+        raise DagflowError(f"cache file not found: {path}")
+    try:
+        with SQLiteCache(path) as cache:
+            if args.action == "info":
+                info = cache.stats()
+                if args.json:
+                    print(json.dumps(info))
+                else:
+                    print(f"{path}: {info['entries']} entries, {info['bytes']:,} bytes")
+                    if info["entries"]:
+                        for label in ("oldest", "newest"):
+                            when = datetime.fromtimestamp(info[label]).isoformat(" ", "seconds")
+                            print(f"  {label}: {when}")
+            else:
+                before = len(cache)
+                if args.older_than is None:
+                    cache.clear()
+                    removed = before
+                else:
+                    removed = cache.purge(args.older_than)
+                print(f"removed {removed} of {before} entries from {path}")
+    except sqlite3.Error as exc:
+        raise DagflowError(f"{path} is not a dagflow cache: {exc}") from exc
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dagflow", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -346,6 +377,18 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
     ui.add_argument("-v", "--verbose", action="store_true", help="log every HTTP request")
     ui.set_defaults(handler=_cmd_ui)
+
+    cache = sub.add_parser("cache", help="inspect or clear a SQLite result cache")
+    cache.add_argument("action", choices=("info", "clear"))
+    cache.add_argument("path", help="SQLite cache file (as passed to --cache)")
+    cache.add_argument("--json", action="store_true", help="info: print as JSON")
+    cache.add_argument(
+        "--older-than",
+        type=float,
+        metavar="SECONDS",
+        help="clear: only remove entries written more than this long ago",
+    )
+    cache.set_defaults(handler=_cmd_cache)
     return parser
 
 
