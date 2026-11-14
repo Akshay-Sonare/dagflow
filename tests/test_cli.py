@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from dagflow.cache import SQLiteCache
 from dagflow.cli import load_workflow, main, parse_param, split_spec
 
 WORKFLOW_SOURCE = """
@@ -264,3 +265,44 @@ def test_python_dash_m_dagflow_runs_the_cli() -> None:
     )
     assert proc.returncode == 0
     assert "dagflow" in proc.stdout
+
+
+def _seed_cache(path: Path) -> None:
+    with SQLiteCache(path) as cache:
+        cache.set("a", [1, 2, 3])
+        cache.set("b", "x" * 100)
+
+
+def test_cache_info_and_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = tmp_path / "c.db"
+    _seed_cache(db)
+    assert main(["cache", "info", str(db)]) == 0
+    assert "2 entries" in capsys.readouterr().out
+    assert main(["cache", "info", str(db), "--json"]) == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["entries"] == 2
+    assert info["bytes"] > 100
+
+
+def test_cache_clear_all_and_older_than(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = tmp_path / "c.db"
+    _seed_cache(db)
+    assert main(["cache", "clear", str(db), "--older-than", "3600"]) == 0
+    assert "removed 0 of 2" in capsys.readouterr().out
+    assert main(["cache", "clear", str(db), "--older-than", "0"]) == 0
+    assert "removed 2 of 2" in capsys.readouterr().out
+    _seed_cache(db)
+    assert main(["cache", "clear", str(db)]) == 0
+    with SQLiteCache(db) as cache:
+        assert len(cache) == 0
+        assert cache.stats()["oldest"] is None
+
+
+def test_cache_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    missing = tmp_path / "nope.db"
+    assert main(["cache", "info", str(missing)]) == 2
+    assert not missing.exists()  # must not create an empty database
+    junk = tmp_path / "junk.db"
+    junk.write_text("not a database" * 100)
+    assert main(["cache", "info", str(junk)]) == 2
+    assert "error:" in capsys.readouterr().err
