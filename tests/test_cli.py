@@ -259,6 +259,28 @@ def test_events_jsonl_carries_item_index(tmp_path: Path) -> None:
     )
 
 
+def test_plan_json(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["plan", str(wf_file), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["workflow"] == "cli_demo"
+    assert [[t["name"] for t in stage] for stage in doc["stages"]] == [
+        ["numbers"],
+        ["total"],
+        ["broken"],
+    ]
+    total = doc["stages"][1][0]
+    assert total["depends_on"] == ["numbers"]
+    assert total["tags"] == ["summary"]
+    assert doc["required_params"] == {}
+
+
+def test_plan_json_marks_mapped_tasks(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["plan", str(PRICE_EXAMPLE), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    mapped = [t for stage in doc["stages"] for t in stage if t["map"]]
+    assert [(t["name"], t["map"]) for t in mapped] == [("price", "skus")]
+
+
 def test_python_dash_m_dagflow_runs_the_cli() -> None:
     proc = subprocess.run(
         [sys.executable, "-m", "dagflow", "--help"], capture_output=True, text=True, check=False
