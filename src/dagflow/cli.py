@@ -193,6 +193,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             cache.close()
         if events_file is not None:
             events_file.close()
+    if args.output:
+        Path(args.output).write_text(
+            json.dumps(result.to_dict(), indent=2, default=repr) + "\n", encoding="utf-8"
+        )
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, default=repr))
     else:
@@ -345,6 +349,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, metavar="SECONDS", help="cancel the whole run after this long"
     )
     run.add_argument("--json", action="store_true", help="print results as JSON on stdout")
+    run.add_argument(
+        "--output",
+        "-o",
+        metavar="PATH",
+        help="also write the JSON results to PATH (keeps the readable summary)",
+    )
     run.add_argument(
         "--dry-run", action="store_true", help="validate params and print the plan; run nothing"
     )
