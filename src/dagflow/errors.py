@@ -6,7 +6,14 @@ can catch the whole family with a single ``except`` clause.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import difflib
+from collections.abc import Iterable, Mapping, Sequence
+
+
+def _did_you_mean(name: str, candidates: Iterable[str]) -> str:
+    """`` Did you mean 'x'?`` for the closest candidate, or an empty string."""
+    close = difflib.get_close_matches(name, list(candidates), n=1)
+    return f" Did you mean {close[0]!r}?" if close else ""
 
 
 class DagflowError(Exception):
@@ -24,9 +31,14 @@ class DuplicateTaskError(DagflowError):
 class UnknownTaskError(DagflowError):
     """A task name was referenced that does not exist in the workflow."""
 
-    def __init__(self, name: str, referenced_by: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        referenced_by: str | None = None,
+        candidates: Iterable[str] = (),
+    ) -> None:
         suffix = f" (referenced by {referenced_by!r})" if referenced_by else ""
-        super().__init__(f"unknown task {name!r}{suffix}")
+        super().__init__(f"unknown task {name!r}{suffix}." + _did_you_mean(name, candidates))
         self.name = name
         self.referenced_by = referenced_by
 
@@ -50,12 +62,19 @@ class CycleError(DagflowError):
 class MissingInputError(DagflowError):
     """A task parameter is neither an upstream task nor a supplied run parameter."""
 
-    def __init__(self, task: str, inputs: Sequence[str]) -> None:
+    def __init__(self, task: str, inputs: Sequence[str], candidates: Iterable[str] = ()) -> None:
         self.task = task
         self.inputs = list(inputs)
+        known = list(candidates)
+        hints = [
+            f"{i!r} -> {close[0]!r}"
+            for i in self.inputs
+            if (close := difflib.get_close_matches(i, known, n=1))
+        ]
         super().__init__(
             f"task {task!r} needs inputs that are neither tasks nor params: "
             + ", ".join(self.inputs)
+            + (f" (did you mean {', '.join(hints)}?)" if hints else "")
         )
 
 

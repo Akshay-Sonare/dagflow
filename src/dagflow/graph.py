@@ -34,7 +34,7 @@ class DAG:
     def add_edge(self, upstream: str, downstream: str) -> None:
         for node in (upstream, downstream):
             if node not in self._up:
-                raise UnknownTaskError(node)
+                raise UnknownTaskError(node, candidates=self._up)
         self._up[downstream].add(upstream)
         self._down[upstream].add(downstream)
 
@@ -143,7 +143,7 @@ class DAG:
         keep: set[str] = set()
         for target in targets:
             if target not in self:
-                raise UnknownTaskError(target)
+                raise UnknownTaskError(target, candidates=self._up)
             keep |= {target, *self.ancestors(target)}
         nodes = [n for n in self._up if n in keep]
         return DAG(nodes, ((u, d) for u, d in self.edges() if u in keep and d in keep))
