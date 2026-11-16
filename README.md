@@ -144,6 +144,7 @@ dagflow run   pipeline.py --events events.jsonl     # stream lifecycle events as
 dagflow run   pipeline.py -o result.json              # keep the readable summary AND save the JSON results
 dagflow cache info  .dagflow.db                     # entries, size and age of a --cache file
 dagflow cache clear .dagflow.db [--older-than 86400] # drop everything, or only stale entries
+dagflow run   pipeline.py --pool api=2              # limit tasks declared with @task(pool="api")
 dagflow run   pipeline.py -T nightly                # every task tagged "nightly" + its deps
 ```
 
