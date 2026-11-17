@@ -380,3 +380,37 @@ def test_parse_pool_rejects_bad_values(raw: str) -> None:
 
 def test_parse_pool_ok() -> None:
     assert parse_pool("api=3") == ("api", 3)
+
+
+def test_params_file_with_flag_override(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "needs.py"
+    path.write_text(
+        "from dagflow import Workflow\nworkflow = Workflow('n')\n"
+        "@workflow.task\ndef a(region, n=1): return f'{region}{n}'\n"
+    )
+    params = tmp_path / "params.json"
+    params.write_text('{"region": "EU", "n": 2}')
+    argv = ["run", str(path), "--json", "-q", "--params-file", str(params)]
+    assert main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["tasks"]["a"]["value"] == "EU2"
+    assert main([*argv, "-p", "n=5"]) == 0
+    assert json.loads(capsys.readouterr().out)["tasks"]["a"]["value"] == "EU5"
+    assert main(["run", str(path), "--dry-run", "--params-file", str(params)]) == 0
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [(None, "cannot read params file"), ("{oops", "not valid JSON"), ("[1]", "JSON object")],
+)
+def test_params_file_errors(
+    wf_file: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    content: str | None,
+    message: str,
+) -> None:
+    params = tmp_path / "p.json"
+    if content is not None:
+        params.write_text(content)
+    assert main(["run", str(wf_file), "--params-file", str(params)]) == 2
+    assert message in capsys.readouterr().err

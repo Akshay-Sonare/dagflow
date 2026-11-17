@@ -85,6 +85,24 @@ def parse_pool(raw: str) -> tuple[str, int]:
     return name, limit
 
 
+def run_params(args: argparse.Namespace) -> dict[str, Any]:
+    """Params for a run: ``--params-file`` values first, then ``-p`` flags override them."""
+    params: dict[str, Any] = {}
+    path = getattr(args, "params_file", None)
+    if path:
+        try:
+            loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise DagflowError(f"cannot read params file {path}: {exc.strerror or exc}") from None
+        except ValueError as exc:
+            raise DagflowError(f"params file {path} is not valid JSON: {exc}") from None
+        if not isinstance(loaded, dict):
+            raise DagflowError(f"params file {path} must contain a JSON object")
+        params.update(loaded)
+    params.update(dict(args.param))
+    return params
+
+
 class ConsoleReporter:
     """Event listener that prints a live, optionally coloured progress log."""
 
@@ -193,7 +211,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     cache = SQLiteCache(args.cache) if args.cache else None
     try:
         result = wf.run(
-            dict(args.param),
+            run_params(args),
             targets=args.target or None,
             tags=args.tag or None,
             max_concurrency=args.jobs,
@@ -229,7 +247,7 @@ def _stage(wf: Workflow, layer: list[str]) -> str:
 def _dry_run(wf: Workflow, args: argparse.Namespace) -> int:
     """Validate against the given params and print the stages without running anything."""
     targets, tags = args.target or None, args.tag or None
-    wf.validate(dict(args.param), targets=targets, tags=tags)
+    wf.validate(run_params(args), targets=targets, tags=tags)
     for i, layer in enumerate(wf.plan(targets=targets, tags=tags), start=1):
         print(f"stage {i}: {_stage(wf, layer)}")
     print("\ndry run: validation passed, nothing was executed", file=sys.stderr)
@@ -356,6 +374,11 @@ def build_parser() -> argparse.ArgumentParser:
     common(run)
     run.add_argument(
         "-p", "--param", action="append", type=parse_param, default=[], metavar="KEY=VALUE"
+    )
+    run.add_argument(
+        "--params-file",
+        metavar="PATH",
+        help="JSON object of run params; -p flags override its values",
     )
     run.add_argument("-j", "--jobs", type=int, default=8, help="max concurrent tasks")
     run.add_argument(
