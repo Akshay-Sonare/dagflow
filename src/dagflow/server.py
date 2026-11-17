@@ -232,11 +232,13 @@ class Dashboard:
         *,
         cache: Cache | None = None,
         max_concurrency: int = 8,
+        pools: Mapping[str, int] | None = None,
         history: int = 25,
     ) -> None:
         self.workflow = workflow
         self.cache = cache
         self.max_concurrency = max_concurrency
+        self.pools = pools
         self.history = history
         self._runs: OrderedDict[int, RunRecord] = OrderedDict()
         self._ids = itertools.count(1)
@@ -302,6 +304,7 @@ class Dashboard:
             targets=record.targets or None,
             tags=record.tags or None,
             max_concurrency=self.max_concurrency,
+            pools=self.pools,
             cache=self.cache,
             listeners=[record.add_event],
         )

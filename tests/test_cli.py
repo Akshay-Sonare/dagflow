@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from dagflow.cache import SQLiteCache
-from dagflow.cli import load_workflow, main, parse_param, split_spec
+from dagflow.cli import load_workflow, main, parse_param, parse_pool, split_spec
 
 WORKFLOW_SOURCE = """
 from dagflow import Workflow
@@ -352,3 +352,31 @@ def test_run_output_written_even_when_run_fails(tmp_path: Path) -> None:
     out = tmp_path / "r.json"
     assert main(["run", str(flow), "-q", "-o", str(out)]) == 1
     assert json.loads(out.read_text())["ok"] is False
+
+
+POOL_SOURCE = """
+from dagflow import Workflow
+
+workflow = Workflow("pooled")
+
+@workflow.task(pool="api")
+def fetch():
+    return 1
+"""
+
+
+def test_run_pool_flag_sets_pool_limit(tmp_path: Path) -> None:
+    path = tmp_path / "pooled.py"
+    path.write_text(POOL_SOURCE)
+    assert main(["run", str(path), "-q"]) == 2  # pool has no limit
+    assert main(["run", str(path), "-q", "--pool", "api=2"]) == 0
+
+
+@pytest.mark.parametrize("raw", ["api", "=2", "api=x", "api=0"])
+def test_parse_pool_rejects_bad_values(raw: str) -> None:
+    with pytest.raises(argparse.ArgumentTypeError):
+        parse_pool(raw)
+
+
+def test_parse_pool_ok() -> None:
+    assert parse_pool("api=3") == ("api", 3)

@@ -71,6 +71,20 @@ def parse_param(raw: str) -> tuple[str, Any]:
     return key, coerce_param(value)
 
 
+def parse_pool(raw: str) -> tuple[str, int]:
+    """``name=limit`` with a positive integer limit."""
+    name, sep, value = raw.partition("=")
+    if not sep or not name:
+        raise argparse.ArgumentTypeError(f"expected name=limit, got {raw!r}")
+    try:
+        limit = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"pool limit must be an integer, got {value!r}") from None
+    if limit < 1:
+        raise argparse.ArgumentTypeError(f"pool {name!r} limit must be >= 1, got {limit}")
+    return name, limit
+
+
 class ConsoleReporter:
     """Event listener that prints a live, optionally coloured progress log."""
 
@@ -183,6 +197,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             targets=args.target or None,
             tags=args.tag or None,
             max_concurrency=args.jobs,
+            pools=dict(args.pool) or None,
             cache=cache,
             fail_fast=args.fail_fast,
             timeout=args.timeout,
@@ -268,7 +283,7 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 def _cmd_ui(args: argparse.Namespace) -> int:
     wf = load_workflow(args.workflow)
     cache = SQLiteCache(args.cache) if args.cache else None
-    dashboard = Dashboard(wf, cache=cache, max_concurrency=args.jobs)
+    dashboard = Dashboard(wf, cache=cache, max_concurrency=args.jobs, pools=dict(args.pool) or None)
     try:
         server = DashboardServer(dashboard, args.host, args.port, verbose=args.verbose)
     except OSError as exc:
@@ -343,6 +358,14 @@ def build_parser() -> argparse.ArgumentParser:
         "-p", "--param", action="append", type=parse_param, default=[], metavar="KEY=VALUE"
     )
     run.add_argument("-j", "--jobs", type=int, default=8, help="max concurrent tasks")
+    run.add_argument(
+        "--pool",
+        action="append",
+        type=parse_pool,
+        default=[],
+        metavar="NAME=LIMIT",
+        help="cap concurrent tasks of a pool (see @task(pool=...)); repeatable",
+    )
     run.add_argument("--cache", metavar="PATH", help="SQLite file for cached task results")
     run.add_argument("--fail-fast", action="store_true", help="cancel everything on failure")
     run.add_argument(
@@ -383,6 +406,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ui.add_argument("--port", type=int, default=8765)
     ui.add_argument("-j", "--jobs", type=int, default=8, help="max concurrent tasks per run")
+    ui.add_argument(
+        "--pool",
+        action="append",
+        type=parse_pool,
+        default=[],
+        metavar="NAME=LIMIT",
+        help="cap concurrent tasks of a pool (see @task(pool=...)); repeatable",
+    )
     ui.add_argument("--cache", metavar="PATH", help="SQLite file for cached task results")
     ui.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
     ui.add_argument("-v", "--verbose", action="store_true", help="log every HTTP request")
@@ -406,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         code: int = args.handler(args)
-    except DagflowError as exc:
+    except (DagflowError, ValueError) as exc:  # ValueError: bad run options, e.g. -j 0
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return code
