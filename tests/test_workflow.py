@@ -258,3 +258,32 @@ def test_workflow_behaves_like_a_task_container() -> None:
         wf["two"]
     with pytest.raises(TypeError):
         wf.tasks["x"] = one  # type: ignore[index]
+
+
+def test_unknown_task_suggests_close_name() -> None:
+    wf = Workflow("w")
+
+    @wf.task
+    def revenue() -> int:
+        return 1
+
+    with pytest.raises(UnknownTaskError, match="Did you mean 'revenue'"):
+        wf.validate(targets=["revenu"])
+    with pytest.raises(UnknownTaskError) as info:
+        wf["zzzz"]
+    assert "Did you mean" not in str(info.value)
+
+
+def test_missing_input_suggests_task_or_param() -> None:
+    wf = Workflow("w")
+
+    @wf.task
+    def orders() -> int:
+        return 1
+
+    @wf.task
+    def total(order: int, regoin: str) -> int:
+        return order
+
+    with pytest.raises(MissingInputError, match=r"'order' -> 'orders'.*'regoin' -> 'region'"):
+        wf.validate(params={"region": "eu"})

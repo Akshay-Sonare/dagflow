@@ -50,7 +50,7 @@ class Workflow:
         try:
             return self._tasks[name]
         except KeyError:
-            raise UnknownTaskError(name) from None
+            raise UnknownTaskError(name, candidates=self._tasks) from None
 
     @property
     def tasks(self) -> Mapping[str, Task]:
@@ -130,7 +130,9 @@ class Workflow:
                     graph.add_edge(param, item.name)
             for upstream in item.after:
                 if upstream not in self._tasks:
-                    raise UnknownTaskError(upstream, referenced_by=item.name)
+                    raise UnknownTaskError(
+                        upstream, referenced_by=item.name, candidates=self._tasks
+                    )
                 graph.add_edge(upstream, item.name)
         return graph
 
@@ -190,7 +192,7 @@ class Workflow:
                 if p not in self._tasks and p not in provided and not item.has_default(p)
             ]
             if missing:
-                raise MissingInputError(name, missing)
+                raise MissingInputError(name, missing, candidates=[*self._tasks, *provided])
         return graph
 
     def plan(
