@@ -502,3 +502,27 @@ def test_run_can_be_exported_as_a_download() -> None:
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_run_result_includes_cache_stats_and_critical_path() -> None:
+    wf = Workflow("stats")
+
+    @wf.task(cache=True)
+    def first() -> int:
+        return 1
+
+    @wf.task(cache=True)
+    def second(first: int) -> int:
+        return first + 1
+
+    srv = DashboardServer(Dashboard(wf, cache=MemoryCache()), port=0)
+    serve(srv)
+    try:
+        for _ in range(2):
+            _, run = request(srv, "/api/runs", {})
+            stream(srv, run["id"])
+        _, done = request(srv, f"/api/runs/{run['id']}")
+        assert done["result"]["critical_path"] == ["first", "second"]
+        assert done["result"]["cache"] == {"hits": 2, "misses": 0, "hit_rate": 1.0}
+    finally:
+        srv.shutdown()

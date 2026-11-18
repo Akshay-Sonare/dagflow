@@ -166,6 +166,7 @@ Opens a local dashboard (http://127.0.0.1:8765) where you can:
 - **Inspect tasks**: click any task for its docstring, settings, attempts, errors and the
   actual value it returned.
 - **Cancel it**: a running run can be stopped from the page (or `POST /api/runs/<id>/cancel`).
+- **See the summary**: a finished run shows its cache hit rate and critical path (the slowest chain).
 - **Browse history**: recent runs are kept in memory; click one to replay it.
 
 It is built with the standard library only (`http.server` plus a single HTML page with no

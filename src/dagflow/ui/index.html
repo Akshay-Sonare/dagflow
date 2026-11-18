@@ -110,6 +110,8 @@
   .items i.retrying { background: var(--retrying); animation: pulse 1s infinite; }
   .items i.success { background: var(--success); } .items i.cached { background: var(--cached); }
   .items i.failed { background: var(--failed); } .items i.skipped { background: var(--skipped); opacity: .55; }
+  .run-stats { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 8px; }
+  .run-stats b { color: var(--text); font-weight: 600; }
   .items-summary { font-size: 12px; color: var(--muted); margin-top: 12px; }
   .node.skipped, .node.idle { opacity: .45; }
   .node.skipped rect.box { stroke-dasharray: 5 4; }
@@ -188,6 +190,7 @@
         </button>
         <button class="run-btn cancel-btn" id="cancel-btn" type="button" hidden>Cancel run</button>
         <a id="export-link" href="#" hidden>Export run as JSON</a>
+        <div class="run-stats" id="run-stats" hidden></div>
         <div class="form-error" id="form-error" role="alert"></div>
       </form>
     </section>
@@ -504,7 +507,24 @@ function paintStatus() {
   if (S.run) link.href = `/api/runs/${S.run.id}/export`;
 }
 
-function paint() { paintGraph(); paintTimeline(); paintDetails(); paintStatus(); }
+function paintStats() {
+  const box = $("run-stats");
+  const r = S.run?.result;
+  box.hidden = !r;
+  if (!r) return;
+  const rows = [];
+  if (r.cache && r.cache.hit_rate !== null) {
+    const { hits, misses, hit_rate: rate } = r.cache;
+    rows.push(el("div", {}, "Cache: ", el("b", {}, `${Math.round(rate * 100)}% hit rate`), ` (${hits} hit${hits === 1 ? "" : "s"}, ${misses} miss${misses === 1 ? "" : "es"})`));
+  }
+  if (r.critical_path?.length) {
+    rows.push(el("div", {}, "Critical path: ", el("b", {}, r.critical_path.join(" → "))));
+  }
+  box.replaceChildren(...rows);
+  box.hidden = rows.length === 0;
+}
+
+function paint() { paintGraph(); paintTimeline(); paintDetails(); paintStatus(); paintStats(); }
 
 function select(name) { S.selected = name; paintGraph(); paintDetails(); }
 
