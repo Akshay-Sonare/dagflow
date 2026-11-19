@@ -258,7 +258,20 @@ class Workflow:
             timeout: Wall-clock limit (seconds) for the whole run; on expiry running tasks are
                 cancelled and the rest skipped.
             listeners: Callables that receive every :class:`~dagflow.events.Event`.
+
+        Raises:
+            RuntimeError: If called from a running event loop; use :meth:`arun` there.
         """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            # Checked before arun() is called so no coroutine is left un-awaited.
+            raise RuntimeError(
+                "Workflow.run() cannot be called from a running event loop "
+                "(e.g. inside async code or a notebook); use `await workflow.arun(...)` instead"
+            )
         return asyncio.run(
             self.arun(
                 params,
