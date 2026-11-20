@@ -1,3 +1,6 @@
+import asyncio
+import warnings
+
 import pytest
 
 from dagflow import (
@@ -287,3 +290,20 @@ def test_missing_input_suggests_task_or_param() -> None:
 
     with pytest.raises(MissingInputError, match=r"'order' -> 'orders'.*'regoin' -> 'region'"):
         wf.validate(params={"region": "eu"})
+
+
+def test_run_inside_running_loop_points_to_arun() -> None:
+    wf = Workflow("w")
+
+    @wf.task
+    def one() -> int:
+        return 1
+
+    async def main() -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # an un-awaited coroutine would raise here
+            with pytest.raises(RuntimeError, match="arun"):
+                wf.run()
+        assert (await wf.arun())["one"] == 1
+
+    asyncio.run(main())
