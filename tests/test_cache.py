@@ -142,3 +142,24 @@ def test_memory_cache_clear_and_validation() -> None:
         MemoryCache(ttl=0)
     with pytest.raises(ValueError, match="max_size"):
         MemoryCache(max_size=0)
+
+
+def test_changed_parameter_default_invalidates_cache() -> None:
+    """A default lives outside the bytecode, so it must be part of the cache key."""
+    calls: list[int] = []
+
+    def build(default: int) -> Workflow:
+        wf = Workflow("defaults")
+
+        def f(n: int = default) -> int:
+            calls.append(n)
+            return n
+
+        wf.task(cache=True)(f)
+        return wf
+
+    cache = MemoryCache()
+    assert build(5).run(cache=cache)["f"] == 5
+    assert build(10).run(cache=cache)["f"] == 10
+    assert build(10).run(cache=cache)["f"] == 10  # unchanged default still hits
+    assert calls == [5, 10]
