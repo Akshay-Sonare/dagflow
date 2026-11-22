@@ -557,3 +557,31 @@ def test_cache_stats_without_cache_has_no_hit_rate() -> None:
         return 1
 
     assert wf.run().cache_stats() == {"hits": 0, "misses": 0, "hit_rate": None}
+
+
+def test_cache_write_failure_does_not_fail_the_task() -> None:
+    class BrokenWrites(MemoryCache):
+        def set(self, key: str, value: Any) -> None:
+            raise OSError("disk full")
+
+    wf = Workflow()
+
+    @wf.task(cache=True)
+    def value() -> int:
+        return 7
+
+    result = wf.run(cache=BrokenWrites())
+    assert result.ok
+    assert result["value"] == 7
+    assert result.results["value"].state is TaskState.SUCCESS
+
+
+def test_context_param_found_when_type_hints_cannot_be_resolved() -> None:
+    wf = Workflow()
+
+    @wf.task
+    def work(ctx: "Context", missing: "NoSuchType" = None) -> str:  # type: ignore[name-defined]  # noqa: F821
+        return ctx.task
+
+    assert wf["work"].context_param == "ctx"
+    assert wf.run()["work"] == "work"
