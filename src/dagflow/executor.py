@@ -464,7 +464,13 @@ class Executor:
                     )
                 )
                 return result
-            except Exception as exc:
+            except (Exception, asyncio.CancelledError) as exc:
+                if isinstance(exc, asyncio.CancelledError):
+                    # Cancelled by the scheduler (fail-fast, run timeout): propagate. A stray
+                    # CancelledError from the task's own awaited work is just a task failure.
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        raise
                 if task.retry.should_retry(exc, result.attempts):
                     delay = task.retry.delay(result.attempts)
                     self.bus.emit(

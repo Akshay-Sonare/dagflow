@@ -557,3 +557,28 @@ def test_cache_stats_without_cache_has_no_hit_rate() -> None:
         return 1
 
     assert wf.run().cache_stats() == {"hits": 0, "misses": 0, "hit_rate": None}
+
+
+def test_task_raising_cancelled_error_fails_only_that_task() -> None:
+    """A CancelledError from a task's own awaited work must not abort the whole run."""
+    wf = Workflow("stray-cancel")
+
+    @wf.task
+    async def broken() -> None:
+        fut = asyncio.get_running_loop().create_future()
+        fut.cancel()
+        await fut
+
+    @wf.task
+    def child(broken: None) -> int:
+        return 1
+
+    @wf.task
+    def independent() -> int:
+        return 2
+
+    result = wf.run()
+    assert result.results["broken"].state is TaskState.FAILED
+    assert isinstance(result.results["broken"].error, asyncio.CancelledError)
+    assert result.results["child"].state is TaskState.SKIPPED
+    assert result["independent"] == 2
