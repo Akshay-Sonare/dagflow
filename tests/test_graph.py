@@ -89,3 +89,12 @@ def test_cycle_report_ignores_acyclic_tails() -> None:
     with pytest.raises(CycleError) as exc:
         dag.topological_order()
     assert exc.value.cycle == ["a", "b", "a"]
+
+
+def test_cycle_search_skips_dead_end_nodes_downstream_of_a_cycle() -> None:
+    # "a" and "z" hang off the cycle m <-> n but are not part of it. The search starts at "a"
+    # (a dead end), finishes it, then must skip it again when reached from "m".
+    dag = DAG("amnz", [("m", "n"), ("n", "m"), ("m", "a"), ("n", "z")])
+    with pytest.raises(CycleError) as info:
+        dag.topological_order()
+    assert info.value.cycle == ["m", "n", "m"]
