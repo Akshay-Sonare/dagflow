@@ -213,10 +213,23 @@ def cache_key(task: Task, inputs: Mapping[str, Any]) -> str | None:
     """Stable key for ``task`` called with ``inputs``; ``None`` if inputs can't be hashed.
 
     The key changes whenever the task's bytecode changes, so editing a task
-    invalidates its cached results automatically.
+    invalidates its cached results automatically. Parameter defaults the call falls back
+    on are part of the key too, since they live outside the bytecode.
     """
+    defaults = {
+        p: task.signature.parameters[p].default
+        for p in task.inputs
+        if p not in inputs and task.has_default(p)
+    }
     try:
-        payload = _dumps({"task": task.name, "code": _code_fingerprint(task), "inputs": inputs})
+        payload = _dumps(
+            {
+                "task": task.name,
+                "code": _code_fingerprint(task),
+                "inputs": inputs,
+                **({"defaults": defaults} if defaults else {}),
+            }
+        )
     except (TypeError, ValueError) as exc:
         log.warning("task %r: inputs are not cacheable (%s); running uncached", task.name, exc)
         return None
