@@ -171,6 +171,21 @@ class JsonLinesReporter:
         self.stream.flush()
 
 
+def _failure_lines(result: RunResult) -> list[str]:
+    """One ``name: ErrorType: message`` line per failed task or mapped item.
+
+    The live reporter shows these as they happen, but with ``-q`` or in a long log the
+    reason a run failed would otherwise be missing from the final summary.
+    """
+    lines: list[str] = []
+    for name, r in result.results.items():
+        leaves = [(f"{name}[{i}]", item) for i, item in enumerate(r.items)] if r.items else []
+        for label, leaf in leaves or [(name, r)]:
+            if leaf.state is TaskState.FAILED and leaf.error is not None:
+                lines.append(f"  {label}: {type(leaf.error).__name__}: {leaf.error}")
+    return lines
+
+
 def format_summary(result: RunResult) -> str:
     labels = {
         name: name if r.items is None else f"{name} ×{len(r.items)}"
@@ -181,6 +196,9 @@ def format_summary(result: RunResult) -> str:
     for name, r in result.results.items():
         label = labels[name]
         lines.append(f"{label:<{width}}  {r.state:<9}  {r.attempts:>5}  {r.duration:>6.2f}s")
+    failures = _failure_lines(result)
+    if failures:
+        lines.extend(["", "failures:", *failures])
     counts = {state: len(result.by_state(state)) for state in TaskState}
     tally = ", ".join(f"{n} {state}" for state, n in counts.items() if n)
     verdict = "succeeded" if result.ok else "FAILED"
