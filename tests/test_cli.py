@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from dagflow import Workflow
 from dagflow.cache import SQLiteCache
-from dagflow.cli import load_workflow, main, parse_param, parse_pool, split_spec
+from dagflow.cli import format_summary, load_workflow, main, parse_param, parse_pool, split_spec
 
 WORKFLOW_SOURCE = """
 from dagflow import Workflow
@@ -93,6 +94,39 @@ def test_run_failure_exit_code(wf_file: Path, capsys: pytest.CaptureFixture[str]
     err = capsys.readouterr().err
     assert "kaboom" in err
     assert "FAILED" in err
+
+
+def test_quiet_failure_summary_lists_errors(
+    wf_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["run", str(wf_file), "-p", "explode=true", "-q"]) == 1
+    err = capsys.readouterr().err
+    assert "failures:" in err
+    assert ": kaboom" in err.split("failures:")[1]
+
+
+def test_summary_lists_failed_map_items() -> None:
+    wf = Workflow("m")
+
+    @wf.task(map="xs")
+    def each(xs: int) -> int:
+        if xs == 1:
+            raise ValueError("bad item")
+        return xs
+
+    out = format_summary(wf.run({"xs": [0, 1, 2]}))
+    assert "each[1]: ValueError: bad item" in out
+    assert "each[0]" not in out
+
+
+def test_summary_has_no_failures_section_on_success() -> None:
+    wf = Workflow("ok")
+
+    @wf.task
+    def fine() -> int:
+        return 1
+
+    assert "failures:" not in format_summary(wf.run())
 
 
 def test_run_with_target(wf_file: Path, capsys: pytest.CaptureFixture[str]) -> None:

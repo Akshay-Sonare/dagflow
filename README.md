@@ -56,7 +56,7 @@ print(result["revenue"])
 | **Validation up front** | Cycles (with the offending path), unknown tasks and missing inputs are reported before anything runs. |
 | **Partial runs** | `targets=[...]` runs only the requested tasks and their ancestors. |
 | **Tag filters** | `tags=[...]` / `-T tag` runs every task carrying a tag, plus what it depends on. Combines with `targets`. |
-| **Observability** | Typed lifecycle events on a pub/sub bus; the CLI's live reporter is just one listener. |
+| **Observability** | The run summary lists each failed task (and mapped item) with its error, even with `-q`. Typed lifecycle events on a pub/sub bus; the CLI's live reporter is just one listener. |
 | **Visualisation** | Export the graph as Mermaid or Graphviz DOT. |
 | **Web dashboard** | `dagflow ui` serves a live, zero-dependency dashboard: graph, timeline, task inspector and run history. |
 
